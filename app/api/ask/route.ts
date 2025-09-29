@@ -30,22 +30,24 @@ function detectUrgent(ageMonths: number, text: string) {
   return hasRed || smallInfant;
 }
 
-// Sıcaklık (°C) yakala
+// Sıcaklık (°C) yakala: "40", "40°", "40 C", "40 derece", "38.5"
 function extractTempC(q: string): number | null {
   const s = (q || '').toLowerCase();
   const m = s.match(/(\d{2}(?:[.,]\d)?)(?:\s?°\s?c| ?c| ?derece)?/i);
   if (!m) return null;
   const n = parseFloat(m[1].replace(',', '.'));
-  if (isNaN(n) || n < 30 || n > 45) return null;
+  if (isNaN(n)) return null;
+  // makul aralık kontrolü
+  if (n < 30 || n > 45) return null;
   return n;
 }
 
-// Risk değerlendirme: kural tabanlı acil kesme
+// Risk değerlendirme: kural tabanlı “acil” kesme
 function evaluateRisk(ageMonths: number, q: string) {
   const t = extractTempC(q);
   const keywordsUrgent = detectUrgent(ageMonths, q);
   const veryYoungFever = ageMonths < 3 && t !== null && t >= 38;
-  const hyperpyrexia = t !== null && t >= 40;
+  const hyperpyrexia = t !== null && t >= 40; // 40°C ve üzeri
   if (hyperpyrexia || veryYoungFever || keywordsUrgent) {
     return { level: 'emergency' as const, temp: t, reason: hyperpyrexia ? '≥40°C' : veryYoungFever ? '<3 ay + ≥38°C' : 'metinde acil belirti' };
   }
@@ -74,110 +76,46 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// Kullanıcıya gösterilecek metni JSON'dan üret
-function renderAnswerFromJSON(obj: any) {
-  try {
-    const summary = (obj?.summary || '').trim();
-    const steps: string[] = Array.isArray(obj?.actions) ? obj.actions : [];
-    const doctor: string[] = Array.isArray(obj?.doctor_when) ? obj.doctor_when : [];
-    const extra: string[] = Array.isArray(obj?.notes) ? obj.notes : [];
-
-    const bullets = (arr: string[]) => arr.filter(Boolean).map(x => `• ${x.trim()}`).join('\n');
-
-    let out = '';
-    if (summary) out += `${summary}\n`;
-    if (steps.length) out += bullets(steps) + '\n';
-    if (doctor.length) out += `Ne zaman doktora?\n${bullets(doctor)}\n`;
-    if (extra.length) out += bullets(extra) + '\n';
-    return out.trim();
-  } catch {
-    return '';
-  }
-}
-
-/** ------------ GEMINI (v1, 2.5-pro → 2.5-flash, JSON çıktısı) ------------ */
-async function callGeminiJSON(prompt: string) {
+/** ------------ GEMINI (v1 + 2.5-flash, kısa çıktı) ------------ */
+async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
   if (!key) throw new Error('GEMINI_API_KEY yok');
 
-  const MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash']; // kalite → hızlı fallback
-  const urlFor = (m: string) => `https://generativelanguage.googleapis.com/v1/models/${m}:generateContent?key=${key}`;
+  const model = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
 
-  const reqBody = {
-    contents: [{ role: 'user', parts: [{ text: prompt }]}],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 180,             // kısa, net
-      responseMimeType: 'application/json' // JSON iste
-    }
-  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }]}],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 160,  // mümkün olan en kısa yanıt
+        topP: 0.9,
+        topK: 40,
+      }
+    }),
+  });
 
-  for (const model of MODELS) {
-    const res = await fetch(urlFor(model), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(reqBody),
-    });
-    const j = await res.json().catch(() => ({}));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error?.message || `HTTP ${res.status}`);
 
-    if (!res.ok) {
-      const msg = j?.error?.message || `HTTP ${res.status}`;
-      // model erişilemezse sıradakine geç
-      if (/not\s+found|unsupported|permission/i.test(msg)) continue;
-      throw new Error(msg);
-    }
+  const parts = j?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
+    : '';
 
-    // JSON bekliyoruz; yine de güvenle parse et
-    let obj: any = null;
-    try {
-      const raw = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    } catch {
-      // Bazı sürümlerde zaten obj döner
-      obj = j?.candidates?.[0]?.content?.parts?.[0] ?? null;
-    }
-
-    if (obj && (obj.summary || obj.actions || obj.doctor_when)) {
-      return { ok: true, model, obj };
-    }
-
-    // hiç içerik yoksa sebebi bul
-    const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
-    throw new Error(String(finish));
-  }
-
-  throw new Error('no_model_available');
+  if (text) return { text };
+  const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
+  throw new Error(String(finish));
 }
 
-async function askGeminiStructured(system: string, user: string) {
-  // Sıkı, kısa, JSON şablonlu prompt
-  const prompt = [
-    'Aşağıdaki kurallara %100 uy:',
-    '• Kısa ve sakin Türkçe yaz.',
-    '• Tanı koyma, ilaç/DOZ verme, marka önermeden konuş.',
-    '• Sadece verilen bağlamı ve genel güvenli ebeveynlik bilgisini kullan.',
-    '• Cevabı SADECE şu JSON biçiminde ver, markdown KULLANMA:',
-    '{',
-    '  "summary": "tek cümle özet",',
-    '  "actions": ["madde1","madde2","madde3"],',
-    '  "doctor_when": ["şu durumda...","bu durumda..."],',
-    '  "notes": ["varsa ek kısa not"]',
-    '}',
-    '',
-    'Sistem talimatı:',
-    system,
-    '',
-    'Kullanıcı:',
-    user
-  ].join('\n');
-
+async function askGemini(system: string, user: string) {
+  const prompt = `${system}\n\n---\n\n${user}`;
   try {
-    const r = await callGeminiJSON(prompt);
-    const pretty = renderAnswerFromJSON(r.obj);
-    if (pretty) {
-      return { text: pretty, llmUsed: true, llmError: null, provider: 'gemini' as const };
-    }
-    return { text: null, llmUsed: false, llmError: 'empty_json', provider: 'gemini' as const };
+    const { text } = await callGemini(prompt);
+    return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
   } catch (e: any) {
     return { text: null, llmUsed: false, llmError: String(e?.message || e), provider: 'gemini' as const };
   }
@@ -220,7 +158,7 @@ export async function POST(req: Request) {
         answer,
         candidates: [],
         disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'gemini', matchedFaqs: 0, urgent: false }
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: false }
       });
     }
 
@@ -233,14 +171,14 @@ export async function POST(req: Request) {
         (t ? `• Bildirilen ateş: yaklaşık ${t}°C.\n` : '') +
         '• 40°C ve üzeri ateş veya 3 aydan küçük bebekte ≥38°C acil değerlendirme gerektirebilir.\n' +
         '• Hemen bir sağlık kuruluşuna başvurun veya 112’yi arayın.\n' +
-        '• İnce giydirin, serin ortam sağlayın; bol sıvı teklif edin.\n' +
+        '• İnce giydirin, serin ve havadar ortam sağlayın; bol sıvı teklif edin.\n' +
         '• Soğuk duş/alkollü ovma uygulamayın; ilaç dozu yazmam.\n' +
-        '• Nefes darlığı, morarma, bilinç değişikliği, tepkisizlik varsa beklemeyin.';
+        '• Nefes darlığı, morarma, bilinç değişikliği, tepkisizlik olursa beklemeyin.';
       return NextResponse.json({
         answer,
         candidates: [],
         disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: true }
       });
     }
 
@@ -256,7 +194,7 @@ export async function POST(req: Request) {
       });
     } catch {}
 
-    // 3) Aday FAQ'lar — kısa bağlam
+    // 3) Aday FAQ'lar (yaş + basit kelime skoru) — bağlamı kısa tut
     let faqs: Faq[] = [];
     try {
       const supa = supabaseServer();
@@ -275,36 +213,36 @@ export async function POST(req: Request) {
           return { ...f, _score: score } as any;
         })
         .sort((a: any, b: any) => b._score - a._score)
-        .slice(0, 2)
+        .slice(0, 2) // bağlamı en fazla 2 FAQ
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
-    // 4) Kısaltılmış bağlam + yapılandırılmış prompt
+    // 4) Bağlamı KISALT
     const clip = (s: string, n: number) =>
       (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
     const system =
       'Pediatri asistanısın. Tanı koymaz, ilaç/doz vermezsin. ' +
-      'Kısa ve sakin Türkçe. Çıktı JSON olacak (summary, actions[3], doctor_when[1-3], notes[0-2]). ' +
-      'Şüphede kalırsan belirsizliğini belirt ve güvenli öneri ver.';
+      'Türkçe, sakin ve kısa yaz. Biçim: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
+      'Acil belirti varsa bunu vurgula.';
 
-    const ctx = faqs.length
+    const context = faqs.length
       ? 'Kısa FAQ bağlamı:\n' +
         faqs.map((f, i) =>
           `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\n` +
           `Soru: ${clip(f.question, 100)}\n` +
           `Cevap: ${clip(f.answer, 220)}`
         ).join('\n\n')
-      : 'İlgili FAQ bulunamadı. Genel, güvenli ebeveynlik önerileri ver.';
+      : 'İlgili FAQ bulunamadı. Genel, güvenli öneriler ver.';
 
     const userMsg =
       `Bebek yaşı (ay): ${ageMonths}\n` +
-      `Soru: ${clip(question, 220)}\n\n` +
-      ctx +
-      (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Uyarıya öncelik ver.' : '');
+      `Soru: ${clip(question, 200)}\n\n` +
+      context +
+      (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Öncelikle acil uyarısını vurgula.' : '');
 
-    // 5) LLM (yapılandırılmış)
-    const { text: aiText, llmUsed, llmError, provider } = await askGeminiStructured(system, userMsg);
+    // 5) LLM
+    const { text: aiText, llmUsed, llmError, provider } = await askGemini(system, userMsg);
 
     let source: 'AI' | 'FAQ' | 'FALLBACK';
     let answer: string;
