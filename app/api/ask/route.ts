@@ -30,6 +30,30 @@ function detectUrgent(ageMonths: number, text: string) {
   return hasRed || smallInfant;
 }
 
+// Sıcaklık (°C) yakala: "40", "40°", "40 C", "40 derece", "38.5"
+function extractTempC(q: string): number | null {
+  const s = (q || '').toLowerCase();
+  const m = s.match(/(\d{2}(?:[.,]\d)?)(?:\s?°\s?c| ?c| ?derece)?/i);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(',', '.'));
+  if (isNaN(n)) return null;
+  // makul aralık kontrolü
+  if (n < 30 || n > 45) return null;
+  return n;
+}
+
+// Risk değerlendirme: kural tabanlı “acil” kesme
+function evaluateRisk(ageMonths: number, q: string) {
+  const t = extractTempC(q);
+  const keywordsUrgent = detectUrgent(ageMonths, q);
+  const veryYoungFever = ageMonths < 3 && t !== null && t >= 38;
+  const hyperpyrexia = t !== null && t >= 40; // 40°C ve üzeri
+  if (hyperpyrexia || veryYoungFever || keywordsUrgent) {
+    return { level: 'emergency' as const, temp: t, reason: hyperpyrexia ? '≥40°C' : veryYoungFever ? '<3 ay + ≥38°C' : 'metinde acil belirti' };
+  }
+  return { level: 'normal' as const, temp: t, reason: null as string | null };
+}
+
 function extractKeywords(q: string) {
   const base = (q || '')
     .toLowerCase()
@@ -52,7 +76,7 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-/** ------------ GEMINI (v1 + 2.5-flash) ------------ */
+/** ------------ GEMINI (v1 + 2.5-flash, kısa çıktı) ------------ */
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
   if (!key) throw new Error('GEMINI_API_KEY yok');
@@ -67,30 +91,23 @@ async function callGemini(prompt: string) {
       contents: [{ role: 'user', parts: [{ text: prompt }]}],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 180,   // daha kısa yanıt
+        maxOutputTokens: 160,  // mümkün olan en kısa yanıt
         topP: 0.9,
         topK: 40,
       }
-      // safetySettings vermiyoruz; varsayılan kalsın
     }),
   });
 
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = j?.error?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(j?.error?.message || `HTTP ${res.status}`);
 
-  const cand = j?.candidates?.[0] || {};
-  const parts = cand?.content?.parts || [];
+  const parts = j?.candidates?.[0]?.content?.parts;
   const text = Array.isArray(parts)
     ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
     : '';
 
   if (text) return { text };
-
-  // içerik yoksa: yine de eldeki sebebi ilet
-  const finish = cand?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
+  const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
   throw new Error(String(finish));
 }
 
@@ -130,9 +147,44 @@ export async function POST(req: Request) {
     }
     if (Number.isNaN(ageMonths) || ageMonths < 0) ageMonths = 0;
 
+    // 0) AŞIRI KISA SORU FİLTRESİ
+    if (question.trim().length < 12) {
+      const answer =
+        'Ön değerlendirme: Soru çok kısa. Daha doğru yönlendirme için şu soruları yanıtlayın:\n' +
+        '• Bebeğin yaşı (ay)?\n' +
+        '• Ölçülen en yüksek ateş kaç °C ve nasıl ölçtünüz?\n' +
+        '• Eşlik eden belirti var mı (nefes darlığı, morarma, kusma, uyuşukluk vb.)?';
+      return NextResponse.json({
+        answer,
+        candidates: [],
+        disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: false }
+      });
+    }
+
+    // 1) KURAL TABANLI ACİL KESME
+    const risk = evaluateRisk(ageMonths, question);
+    if (risk.level === 'emergency') {
+      const t = risk.temp;
+      const answer =
+        '🔺 ACİL UYARI\n' +
+        (t ? `• Bildirilen ateş: yaklaşık ${t}°C.\n` : '') +
+        '• 40°C ve üzeri ateş veya 3 aydan küçük bebekte ≥38°C acil değerlendirme gerektirebilir.\n' +
+        '• Hemen bir sağlık kuruluşuna başvurun veya 112’yi arayın.\n' +
+        '• İnce giydirin, serin ve havadar ortam sağlayın; bol sıvı teklif edin.\n' +
+        '• Soğuk duş/alkollü ovma uygulamayın; ilaç dozu yazmam.\n' +
+        '• Nefes darlığı, morarma, bilinç değişikliği, tepkisizlik olursa beklemeyin.';
+      return NextResponse.json({
+        answer,
+        candidates: [],
+        disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: true }
+      });
+    }
+
     const urgent = detectUrgent(ageMonths, question);
 
-    // Soruyu kaydet (best-effort)
+    // 2) Soruyu kaydet (best-effort)
     try {
       const supa = supabaseServer();
       await supa.from('questions').insert({
@@ -142,7 +194,7 @@ export async function POST(req: Request) {
       });
     } catch {}
 
-    // Aday FAQ'lar (yaş + basit kelime skoru)
+    // 3) Aday FAQ'lar (yaş + basit kelime skoru) — bağlamı kısa tut
     let faqs: Faq[] = [];
     try {
       const supa = supabaseServer();
@@ -151,7 +203,7 @@ export async function POST(req: Request) {
         .select('*')
         .lte('age_min', ageMonths)
         .gte('age_max', ageMonths)
-        .limit(30);
+        .limit(20);
 
       const kws = extractKeywords(question);
       faqs = (data || [])
@@ -161,26 +213,25 @@ export async function POST(req: Request) {
           return { ...f, _score: score } as any;
         })
         .sort((a: any, b: any) => b._score - a._score)
-        .slice(0, 3)                         // bağlamı daha da kısalttık
+        .slice(0, 2) // bağlamı en fazla 2 FAQ
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
-    // Bağlamı KISALT
+    // 4) Bağlamı KISALT
     const clip = (s: string, n: number) =>
       (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
     const system =
-      'Pediatri asistanısın. Tanı koymaz, ilaç/doz vermezsin.' +
-      ' Türkçe, sakin ve kısa yaz. Biçim:' +
-      ' 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde.' +
-      ' 3 aydan küçük + 38°C, nefes darlığı, morarma, bilinç değişikliği varsa ACİL uyar.';
+      'Pediatri asistanısın. Tanı koymaz, ilaç/doz vermezsin. ' +
+      'Türkçe, sakin ve kısa yaz. Biçim: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
+      'Acil belirti varsa bunu vurgula.';
 
     const context = faqs.length
       ? 'Kısa FAQ bağlamı:\n' +
-        faqs.slice(0, 1).map((f, i) =>
-          `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay
-Soru: ${clip(f.question, 100)}
-Cevap: ${clip(f.answer, 220)}`
+        faqs.map((f, i) =>
+          `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\n` +
+          `Soru: ${clip(f.question, 100)}\n` +
+          `Cevap: ${clip(f.answer, 220)}`
         ).join('\n\n')
       : 'İlgili FAQ bulunamadı. Genel, güvenli öneriler ver.';
 
@@ -190,7 +241,7 @@ Cevap: ${clip(f.answer, 220)}`
       context +
       (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Öncelikle acil uyarısını vurgula.' : '');
 
-    // LLM
+    // 5) LLM
     const { text: aiText, llmUsed, llmError, provider } = await askGemini(system, userMsg);
 
     let source: 'AI' | 'FAQ' | 'FALLBACK';
