@@ -49,10 +49,15 @@ function supabaseServer() {
 
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
-  const MODELS = ['gemini-1.5-flash-latest', 'gemini-1.5-flash-8b-latest'];
+  // Erişimi en yaygın 3 model; sırayla dener
+  const MODELS = [
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash-8b-latest',
+    'gemini-1.5-pro-latest',
+  ];
 
   for (const model of MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -73,14 +78,16 @@ async function callGemini(prompt: string) {
       const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
       if (text) return text;
     } else {
-      const msg = j?.error?.message || '';
-      if (!/not found|unsupported/i.test(msg)) {
-        throw new Error(msg || 'Gemini call failed');
-      }
+      const msg = (j?.error?.message || '').toLowerCase();
+      // Eğer model yok/izin yok hata ise sıradaki modele geç
+      if (/(not found|unsupported|permission denied)/.test(msg)) continue;
+      // başka bir hata ise direkt fırlat
+      throw new Error(j?.error?.message || 'Gemini call failed');
     }
   }
   throw new Error('No Gemini model available');
 }
+
 
 async function askGemini(systemMsg: string, userMsg: string) {
   const prompt = `${systemMsg}\n\n${userMsg}`;
