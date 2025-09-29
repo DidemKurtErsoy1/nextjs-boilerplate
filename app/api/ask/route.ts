@@ -47,46 +47,75 @@ function supabaseServer() {
 
 // --- GEMINI ---
 
-// --- Gemini çağrısı (v1, header ile) ---
-// Tek modele sabitle (en stabil ve hızlısı)
+// --- GEMINI çağrısı (v1beta + modeller listenden) ---
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
-  const model = 'gemini-2.5-flash'; // istersen 'gemini-2.5-pro'
+  if (!key) throw new Error('GEMINI_API_KEY yok');
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
+  // ListModels çıktına göre çalışır modeller:
+  const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }]}],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 600 }
-      // Güvenlik ayarları zorunlu değil; gerekirse ekleriz
-    }),
-  });
+  for (const model of MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = j?.error?.message || `HTTP_${res.status}`;
-    throw new Error(msg);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }]}],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 600 },
+        // Güvenlik ayarı: blokları en aza indir (bazı hesaplarda yok sayılır)
+        safetySettings: [
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        ],
+      }),
+    });
+
+    const j = await res.json();
+
+    if (!res.ok) {
+      const msg = j?.error?.message || `HTTP ${res.status}`;
+      // model destekli değilse sıradakine dene
+      if (/not\s+found|unsupported|permission/i.test(msg)) continue;
+      throw new Error(msg);
+    }
+
+    // parts içindeki tüm text alanlarını birleştir
+    const parts = j?.candidates?.[0]?.content?.parts;
+    const text = Array.isArray(parts)
+      ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
+      : '';
+
+    if (text) return { text };
+
+    // Blok nedeni varsa bunu hata olarak geri ver
+    const blocked =
+      j?.promptFeedback?.blockReason ||
+      j?.candidates?.[0]?.finishReason ||
+      'empty_response';
+    throw new Error(String(blocked));
   }
 
-  const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
-  if (!text) throw new Error('empty_response');
-  return text;
+  throw new Error('no_model_available');
 }
 
-// Sistem talimatı + kullanıcı mesajını birleştirip çağırır
 async function askGemini(system: string, user: string) {
-  const prompt = `${system}\n\n---\n\n${user}`;
+  const prompt = `Sistem talimatı:\n${system}\n\nKullanıcı:\n${user}`;
   try {
-    const text = await callGemini(prompt);
+    const { text } = await callGemini(prompt);
     return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
   } catch (e: any) {
-    return { text: null, llmUsed: false, llmError: e?.message || 'gemini_error', provider: 'gemini' as const };
+    return {
+      text: null,
+      llmUsed: false,
+      llmError: String(e?.message || e),
+      provider: 'gemini' as const,
+    };
   }
 }
-
 
 
 // --- GET (sağlık) ---
