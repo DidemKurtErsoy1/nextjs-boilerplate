@@ -52,62 +52,50 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-/** ------------ GEMINI ------------ */
-/** v1beta + ListModels çıktına uygun modeller */
+/** ------------ GEMINI (v1 + 2.5-flash) ------------ */
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
   if (!key) throw new Error('GEMINI_API_KEY yok');
 
-  // Hesabında mevcut olanlar: gemini-2.5-flash, 2.0-flash, 2.0-flash-lite
-  const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+  const model = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
 
-  for (const model of MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }]}],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 180,   // daha kısa yanıt
+        topP: 0.9,
+        topK: 40,
+      }
+      // safetySettings vermiyoruz; varsayılan kalsın
+    }),
+  });
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }]}],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 256,   // sınırı düşürdük (MAX_TOKENS hatasına karşı)
-          topP: 0.9,
-          topK: 40,
-        },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
-    });
-
-    const j = await res.json();
-
-    if (!res.ok) {
-      const msg = j?.error?.message || `HTTP ${res.status}`;
-      if (/not\s+found|unsupported|permission/i.test(msg)) continue; // sıradaki modele dene
-      throw new Error(msg);
-    }
-
-    const parts = j?.candidates?.[0]?.content?.parts;
-    const text = Array.isArray(parts)
-      ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
-      : '';
-
-    if (text) return { text };
-
-    const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
-    throw new Error(String(finish));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = j?.error?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
 
-  throw new Error('no_model_available');
+  const cand = j?.candidates?.[0] || {};
+  const parts = cand?.content?.parts || [];
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
+    : '';
+
+  if (text) return { text };
+
+  // içerik yoksa: yine de eldeki sebebi ilet
+  const finish = cand?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
+  throw new Error(String(finish));
 }
 
 async function askGemini(system: string, user: string) {
-  const prompt = `Sistem talimatı:\n${system}\n\nKullanıcı:\n${user}`;
+  const prompt = `${system}\n\n---\n\n${user}`;
   try {
     const { text } = await callGemini(prompt);
     return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
@@ -163,7 +151,7 @@ export async function POST(req: Request) {
         .select('*')
         .lte('age_min', ageMonths)
         .gte('age_max', ageMonths)
-        .limit(50);
+        .limit(30);
 
       const kws = extractKeywords(question);
       faqs = (data || [])
@@ -173,31 +161,32 @@ export async function POST(req: Request) {
           return { ...f, _score: score } as any;
         })
         .sort((a: any, b: any) => b._score - a._score)
-        .slice(0, 5)
+        .slice(0, 3)                         // bağlamı daha da kısalttık
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
-    // Bağlamı KISALT (MAX_TOKENS hatasına karşı)
+    // Bağlamı KISALT
     const clip = (s: string, n: number) =>
       (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
     const system =
-      'Sen bir pediatri asistanısın. Tıbbi tanı koymazsın ve ilaç/doz vermezsin. ' +
-      'Türkçe, kısa ve sakin yaz. Çıktı formatı: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
-      '3 aydan küçük + 38°C, nefes darlığı, morarma, bilinç değişikliği gibi durumlarda ACİL uyar.';
+      'Pediatri asistanısın. Tanı koymaz, ilaç/doz vermezsin.' +
+      ' Türkçe, sakin ve kısa yaz. Biçim:' +
+      ' 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde.' +
+      ' 3 aydan küçük + 38°C, nefes darlığı, morarma, bilinç değişikliği varsa ACİL uyar.';
 
     const context = faqs.length
-      ? 'İlgili kısa FAQ içeriği:\n' +
-        faqs.slice(0, 2).map((f, i) =>
+      ? 'Kısa FAQ bağlamı:\n' +
+        faqs.slice(0, 1).map((f, i) =>
           `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay
-Soru: ${clip(f.question, 120)}
-Cevap: ${clip(f.answer, 380)}`
+Soru: ${clip(f.question, 100)}
+Cevap: ${clip(f.answer, 220)}`
         ).join('\n\n')
       : 'İlgili FAQ bulunamadı. Genel, güvenli öneriler ver.';
 
     const userMsg =
       `Bebek yaşı (ay): ${ageMonths}\n` +
-      `Soru: ${clip(question, 280)}\n\n` +   // soruyu da kısalttık
+      `Soru: ${clip(question, 200)}\n\n` +
       context +
       (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Öncelikle acil uyarısını vurgula.' : '');
 
