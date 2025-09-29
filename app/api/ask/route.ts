@@ -63,41 +63,44 @@ function supabaseServer() {
 }
 
 // Gemini 1.5 Flash ile yanıt iste
-async function askGemini(system: string, user: string) {
-  if (!process.env.GEMINI_API_KEY) {
-    return { text: null as string | null, llmUsed: false, llmError: 'no_gemini_key', provider: 'gemini' as const };
+async function callGemini(prompt: string) {
+  const key = process.env.GEMINI_API_KEY!;
+  const MODELS = ['gemini-1.5-flash-latest', 'gemini-1.5-flash-8b-latest']; // sırasıyla dene
+
+  for (const model of MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }]}],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 600 },
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        ],
+      }),
+    });
+
+    const j = await res.json();
+    if (res.ok) {
+      const text =
+        j.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
+      if (text) return text;
+    } else {
+      // 404/unsupported ise bir sonraki modele geç
+      const msg = j?.error?.message || '';
+      if (!/not found|unsupported/i.test(msg)) {
+        throw new Error(msg || 'Gemini call failed');
+      }
+    }
   }
 
-  try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text:
-                    `SİSTEM TALİMATI:\n${system}\n\n` +
-                    `KULLANICI MESAJI:\n${user}`
-                }
-              ]
-            }
-          ],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 350 }
-        })
-      }
-    );
+  throw new Error('No Gemini model available');
+}
 
-    const j = await r.json();
-    const text =
-      j?.candidates?.[0]?.content?.parts
-        ?.map((p: any) => p?.text)
-        ?.join('')
-        ?.trim() || null;
 
     return {
       text,
