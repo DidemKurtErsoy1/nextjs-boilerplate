@@ -28,31 +28,43 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setResp(null);
-    const payload = {
-      ageMonths: Number(age || 0),
-      question: question.trim(),
-    };
-    setLastPayload(payload);
-    try {
-      const r = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const j = (await r.json()) as ApiResp;
-      if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
-      setResp(j);
-    } catch (err: any) {
-      setError(err?.message || 'Bir şeyler ters gitti.');
-    } finally {
-      setLoading(false);
-    }
+  // ...
+async function onSubmit(e: React.FormEvent) {
+  e.preventDefault();
+  setLoading(true);
+  setError(null);
+  setResp(null);
+
+  const payload = {
+    ageMonths: Number(age || 0),
+    question: question.trim(),
+  };
+
+  setLastPayload(payload);
+
+  try {
+    // URL'deki ?v=... parametresini API'ye de taşı
+    const provider = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('v') || ''
+      : '';
+
+    const url = provider ? `/api/ask?v=${provider}` : '/api/ask';
+
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const j = (await r.json()) as ApiResp;
+    if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
+    setResp(j);
+  } catch (err: any) {
+    setError(err?.message || 'Bir şeyler ters gitti.');
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
