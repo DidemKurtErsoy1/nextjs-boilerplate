@@ -47,9 +47,9 @@ function supabaseServer() {
 
 // --- GEMINI ---
 
+// --- Gemini çağrısı (v1, header ile) ---
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
-  // Erişimi en yaygın 3 model; sırayla dener
   const MODELS = [
     'gemini-1.5-flash-latest',
     'gemini-1.5-flash-8b-latest',
@@ -57,10 +57,15 @@ async function callGemini(prompt: string) {
   ];
 
   for (const model of MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
+    const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent`;
+
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // query yerine header ile gönderiyoruz
+        'x-goog-api-key': key,
+      },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }]}],
         generationConfig: { temperature: 0.2, maxOutputTokens: 600 },
@@ -74,23 +79,23 @@ async function callGemini(prompt: string) {
     });
 
     const j = await res.json();
+
     if (res.ok) {
       const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
       if (text) return text;
     } else {
       const msg = (j?.error?.message || '').toLowerCase();
-      // Eğer model yok/izin yok hata ise sıradaki modele geç
+      // model bulunamadı/izin yok → sıradakine geç
       if (/(not found|unsupported|permission denied)/.test(msg)) continue;
-      // başka bir hata ise direkt fırlat
-      throw new Error(j?.error?.message || 'Gemini call failed');
+      throw new Error(j?.error?.message || `Gemini call failed (HTTP ${res.status})`);
     }
   }
   throw new Error('No Gemini model available');
 }
 
-
-async function askGemini(systemMsg: string, userMsg: string) {
-  const prompt = `${systemMsg}\n\n${userMsg}`;
+// Prompt oluşturup çağıran sarmalayıcı
+async function askGemini(system: string, user: string) {
+  const prompt = `Sistem talimatı:\n${system}\n\nKullanıcı:\n${user}`;
   try {
     const text = await callGemini(prompt);
     return { text, llmUsed: !!text, llmError: null, provider: 'gemini' as const };
@@ -98,6 +103,7 @@ async function askGemini(systemMsg: string, userMsg: string) {
     return { text: null, llmUsed: false, llmError: e?.message || 'gemini_error', provider: 'gemini' as const };
   }
 }
+
 
 // --- GET (sağlık) ---
 
