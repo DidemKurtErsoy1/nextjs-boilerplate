@@ -48,61 +48,45 @@ function supabaseServer() {
 // --- GEMINI ---
 
 // --- Gemini çağrısı (v1, header ile) ---
+// Tek modele sabitle (en stabil ve hızlısı)
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
-  const MODELS = [
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-8b-latest',
-    'gemini-1.5-pro-latest',
-  ];
+  const model = 'gemini-2.5-flash'; // istersen 'gemini-2.5-pro'
 
-  for (const model of MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // query yerine header ile gönderiyoruz
-        'x-goog-api-key': key,
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }]}],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 600 },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
-    });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }]}],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 600 }
+      // Güvenlik ayarları zorunlu değil; gerekirse ekleriz
+    }),
+  });
 
-    const j = await res.json();
-
-    if (res.ok) {
-      const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
-      if (text) return text;
-    } else {
-      const msg = (j?.error?.message || '').toLowerCase();
-      // model bulunamadı/izin yok → sıradakine geç
-      if (/(not found|unsupported|permission denied)/.test(msg)) continue;
-      throw new Error(j?.error?.message || `Gemini call failed (HTTP ${res.status})`);
-    }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = j?.error?.message || `HTTP_${res.status}`;
+    throw new Error(msg);
   }
-  throw new Error('No Gemini model available');
+
+  const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim?.() || '';
+  if (!text) throw new Error('empty_response');
+  return text;
 }
 
-// Prompt oluşturup çağıran sarmalayıcı
+// Sistem talimatı + kullanıcı mesajını birleştirip çağırır
 async function askGemini(system: string, user: string) {
-  const prompt = `Sistem talimatı:\n${system}\n\nKullanıcı:\n${user}`;
+  const prompt = `${system}\n\n---\n\n${user}`;
   try {
     const text = await callGemini(prompt);
-    return { text, llmUsed: !!text, llmError: null, provider: 'gemini' as const };
+    return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
   } catch (e: any) {
     return { text: null, llmUsed: false, llmError: e?.message || 'gemini_error', provider: 'gemini' as const };
   }
 }
+
 
 
 // --- GET (sağlık) ---
