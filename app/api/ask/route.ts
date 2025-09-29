@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+/** ------------ Tipler ------------ */
 type Faq = {
   id: string;
   age_min: number;
@@ -15,11 +16,11 @@ type Faq = {
   created_at?: string;
 };
 
+/** ------------ Sabitler ------------ */
 const DISCLAIMER =
   'Bu içerik tıbbi tavsiye değildir. Acil belirtilerde 112’yi arayın veya en yakın sağlık kuruluşuna başvurun.';
 
-// --- yardımcılar ---
-
+/** ------------ Yardımcılar ------------ */
 function detectUrgent(ageMonths: number, text: string) {
   const s = (text || '').toLowerCase();
   const redWords = ['nefes','solunum','zor','zorluk','morarma','mavi','havale','nöbet','bilinç','bayıl','tepkisiz'];
@@ -30,12 +31,18 @@ function detectUrgent(ageMonths: number, text: string) {
 }
 
 function extractKeywords(q: string) {
-  const base = (q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  const base = (q || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
   const extras: string[] = [];
   if (base.includes('ateş') || base.includes('ates')) extras.push('ateş');
   if (base.includes('uyku') || base.includes('uyum')) extras.push('uyku');
   if (base.includes('ek') && base.includes('gıda')) extras.push('ek gıda');
   if (base.includes('kabız') || base.includes('kabiz')) extras.push('kabızlık');
+
   return Array.from(new Set([...base, ...extras])).slice(0, 10);
 }
 
@@ -45,14 +52,13 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// --- GEMINI ---
-
-// --- GEMINI çağrısı (v1beta + modeller listenden) ---
+/** ------------ GEMINI ------------ */
+/** v1beta + ListModels çıktına uygun modeller */
 async function callGemini(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
   if (!key) throw new Error('GEMINI_API_KEY yok');
 
-  // ListModels çıktına göre çalışır modeller:
+  // Hesabında mevcut olanlar: gemini-2.5-flash, 2.0-flash, 2.0-flash-lite
   const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
   for (const model of MODELS) {
@@ -63,8 +69,12 @@ async function callGemini(prompt: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }]}],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 600 },
-        // Güvenlik ayarı: blokları en aza indir (bazı hesaplarda yok sayılır)
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 256,   // sınırı düşürdük (MAX_TOKENS hatasına karşı)
+          topP: 0.9,
+          topK: 40,
+        },
         safetySettings: [
           { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
@@ -78,12 +88,10 @@ async function callGemini(prompt: string) {
 
     if (!res.ok) {
       const msg = j?.error?.message || `HTTP ${res.status}`;
-      // model destekli değilse sıradakine dene
-      if (/not\s+found|unsupported|permission/i.test(msg)) continue;
+      if (/not\s+found|unsupported|permission/i.test(msg)) continue; // sıradaki modele dene
       throw new Error(msg);
     }
 
-    // parts içindeki tüm text alanlarını birleştir
     const parts = j?.candidates?.[0]?.content?.parts;
     const text = Array.isArray(parts)
       ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
@@ -91,12 +99,8 @@ async function callGemini(prompt: string) {
 
     if (text) return { text };
 
-    // Blok nedeni varsa bunu hata olarak geri ver
-    const blocked =
-      j?.promptFeedback?.blockReason ||
-      j?.candidates?.[0]?.finishReason ||
-      'empty_response';
-    throw new Error(String(blocked));
+    const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
+    throw new Error(String(finish));
   }
 
   throw new Error('no_model_available');
@@ -108,30 +112,23 @@ async function askGemini(system: string, user: string) {
     const { text } = await callGemini(prompt);
     return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
   } catch (e: any) {
-    return {
-      text: null,
-      llmUsed: false,
-      llmError: String(e?.message || e),
-      provider: 'gemini' as const,
-    };
+    return { text: null, llmUsed: false, llmError: String(e?.message || e), provider: 'gemini' as const };
   }
 }
 
-
-// --- GET (sağlık) ---
-
+/** ------------ GET (sağlık) ------------ */
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
 
-// --- POST (soru-cevap) ---
-
+/** ------------ POST (soru-cevap) ------------ */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
+
+    // Tally webhook desteği
     let ageMonths = Number(body?.ageMonths ?? 0);
     let question = (body?.question ?? '').toString();
-
     if ((!ageMonths || !question) && body?.data?.fields?.length) {
       const fields: any[] = body.data.fields;
       const ageField = fields.find(f => /age|yaş|yas/i.test(f?.key || f?.label));
@@ -147,13 +144,17 @@ export async function POST(req: Request) {
 
     const urgent = detectUrgent(ageMonths, question);
 
-    // soruyu kaydet (best-effort)
+    // Soruyu kaydet (best-effort)
     try {
       const supa = supabaseServer();
-      await supa.from('questions').insert({ user_id: null, child_age_months: ageMonths, text: question });
+      await supa.from('questions').insert({
+        user_id: null,
+        child_age_months: ageMonths,
+        text: question
+      });
     } catch {}
 
-    // aday FAQ'lar
+    // Aday FAQ'lar (yaş + basit kelime skoru)
     let faqs: Faq[] = [];
     try {
       const supa = supabaseServer();
@@ -176,21 +177,31 @@ export async function POST(req: Request) {
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
+    // Bağlamı KISALT (MAX_TOKENS hatasına karşı)
+    const clip = (s: string, n: number) =>
+      (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+
     const system =
       'Sen bir pediatri asistanısın. Tıbbi tanı koymazsın ve ilaç/doz vermezsin. ' +
-      'Türkçe, kısa ve sakin yaz. Çıktı: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
+      'Türkçe, kısa ve sakin yaz. Çıktı formatı: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
       '3 aydan küçük + 38°C, nefes darlığı, morarma, bilinç değişikliği gibi durumlarda ACİL uyar.';
 
     const context = faqs.length
-      ? 'İlgili FAQ içeriği:\n' + faqs.map((f, i) =>
-          `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\nSoru: ${f.question}\nCevap: ${f.answer}\n`
-        ).join('\n')
+      ? 'İlgili kısa FAQ içeriği:\n' +
+        faqs.slice(0, 2).map((f, i) =>
+          `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay
+Soru: ${clip(f.question, 120)}
+Cevap: ${clip(f.answer, 380)}`
+        ).join('\n\n')
       : 'İlgili FAQ bulunamadı. Genel, güvenli öneriler ver.';
 
     const userMsg =
-      `Bebek yaşı (ay): ${ageMonths}\nSoru: ${question}\n\n${context}` +
+      `Bebek yaşı (ay): ${ageMonths}\n` +
+      `Soru: ${clip(question, 280)}\n\n` +   // soruyu da kısalttık
+      context +
       (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Öncelikle acil uyarısını vurgula.' : '');
 
+    // LLM
     const { text: aiText, llmUsed, llmError, provider } = await askGemini(system, userMsg);
 
     let source: 'AI' | 'FAQ' | 'FALLBACK';
@@ -214,6 +225,9 @@ export async function POST(req: Request) {
       meta: { source, llmUsed, llmError, provider, matchedFaqs: faqs.length, urgent }
     });
   } catch (e: any) {
-    return NextResponse.json({ error: 'İşlenemeyen istek', detail: e?.message || 'unknown' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'İşlenemeyen istek', detail: e?.message || 'unknown' },
+      { status: 500 }
+    );
   }
 }
