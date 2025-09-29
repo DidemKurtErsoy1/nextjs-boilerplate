@@ -1,78 +1,152 @@
-'use client'
-import { useState } from 'react'
+'use client';
 
-type ApiResp = { answer: string; candidates: any[]; disclaimer: string; error?: string; detail?: string }
+import { useState } from 'react';
+
+type ApiResp = {
+  answer?: string;
+  candidates?: any[];
+  disclaimer?: string;
+  meta?: {
+    source?: 'AI' | 'FAQ' | 'FALLBACK';
+    llmUsed?: boolean;
+    llmError?: string | null;
+    matchedFaqs?: number;
+    urgent?: boolean;
+  };
+  error?: string;
+  detail?: string;
+};
+
+const cleanAnswer = (s: string) =>
+  (s || '').replace(/^🔹 AI\n|^🔸 FAQ\n|^🔺 Fallback\n/, '');
 
 export default function Home() {
-  const [age, setAge] = useState<number>(7)
-  const [q, setQ] = useState('')
-  const [res, setRes] = useState<ApiResp | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [age, setAge] = useState<string>('7');
+  const [question, setQuestion] = useState<string>('Ateş 38.2; ne yapmalıyım?');
+  const [loading, setLoading] = useState(false);
+  const [resp, setResp] = useState<ApiResp | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastPayload, setLastPayload] = useState<any>(null);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true); setErr(null); setRes(null)
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setResp(null);
+    const payload = {
+      ageMonths: Number(age || 0),
+      question: question.trim(),
+    };
+    setLastPayload(payload);
     try {
       const r = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ageMonths: age, question: q })
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j?.error || 'request_failed')
-      setRes(j)
-    } catch (e:any) {
-      setErr(String(e.message || e))
+        body: JSON.stringify(payload),
+      });
+      const j = (await r.json()) as ApiResp;
+      if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
+      setResp(j);
+    } catch (err: any) {
+      setError(err?.message || 'Bir şeyler ters gitti.');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   return (
-    <main style={{maxWidth:680, margin:'0 auto', padding:24, fontFamily:'system-ui, Arial'}}>
-      <h1 style={{fontSize:28, fontWeight:700, marginBottom:8}}>BabyQ – Anne Sorular</h1>
-      <p style={{opacity:.8, marginBottom:24}}>“Her annenin aklına gelen sorulara güvenilir ve anında cevap”</p>
+    <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
+      <h1 style={{ fontSize: 32, fontWeight: 700 }}>BabyQ – Anne Sorular</h1>
+      <p style={{ opacity: 0.7, marginBottom: 24 }}>
+        “Her annenin aklına gelen sorulara güvenilir ve anında cevap”
+      </p>
 
-      <form onSubmit={submit} style={{display:'grid', gap:12}}>
-        <label> Bebeğin yaşı (ay):
-          <input type="number" min={0} max={60} value={age}
-                 onChange={e=>setAge(Number(e.target.value))}
-                 style={{width:'100%', padding:10, borderRadius:10, border:'1px solid #ccc'}} />
+      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12 }}>
+        <label>
+          Bebeğin yaşı (ay):
+          <input
+            type="number"
+            min={0}
+            max={60}
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            style={{ width: '100%', padding: 10, marginTop: 6 }}
+            required
+          />
         </label>
 
-        <label> Sorun nedir?
-          <textarea rows={4} placeholder="Örn: Ateş 38.2; ne yapmalıyım?"
-                    value={q} onChange={e=>setQ(e.target.value)}
-                    style={{width:'100%', padding:10, borderRadius:10, border:'1px solid #ccc'}} />
+        <label>
+          Sorun nedir?
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            rows={5}
+            style={{ width: '100%', padding: 10, marginTop: 6 }}
+            required
+          />
         </label>
 
-        <button disabled={loading || q.trim().length < 3}
-                style={{padding:'10px 16px', borderRadius:10, border:'none', background:'#111', color:'#fff'}}>
-          {loading ? 'Yanıt aranıyor…' : 'Cevapla'}
+        <button
+          type="submit"
+          disabled={loading || !question.trim()}
+          style={{
+            padding: '14px 16px',
+            background: loading ? '#666' : '#111',
+            color: '#fff',
+            borderRadius: 8,
+            border: 0,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            marginTop: 8,
+          }}
+        >
+          {loading ? 'Cevap hazırlanıyor…' : 'Cevapla'}
         </button>
       </form>
 
-      {err && <p style={{color:'#b00020', marginTop:16}}>Hata: {err}</p>}
+      {error && (
+        <div style={{ marginTop: 16, color: 'crimson' }}>
+          Hata: {error}
+        </div>
+      )}
 
-      {res && (
-        <section style={{marginTop:24}}>
-          <h2 style={{fontSize:20, fontWeight:700, marginBottom:8}}>Yanıt</h2>
-          <p style={{whiteSpace:'pre-wrap'}}>{res.answer}</p>
-          <p style={{fontSize:12, opacity:.8, marginTop:8}}>{res.disclaimer}</p>
+      {resp && (
+        <section style={{ marginTop: 24 }}>
+          <h3 style={{ fontSize: 22, fontWeight: 700 }}>Yanıt</h3>
+          <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
+            {cleanAnswer(resp.answer || '')}
+          </div>
 
-          {res.candidates?.length > 0 && (
-            <details style={{marginTop:16}}>
-              <summary>Aday kaynaklar ({res.candidates.length})</summary>
-              <ul>
-                {res.candidates.map((c:any) => (
-                  <li key={c.id}><strong>{c.category}</strong>: {c.question}</li>
+          {resp.candidates?.length ? (
+            <details style={{ marginTop: 16 }}>
+              <summary>Kaynakları göster ({resp.candidates.length})</summary>
+              <ul style={{ marginTop: 8 }}>
+                {resp.candidates.map((c: any, i: number) => (
+                  <li key={c.id || i} style={{ marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600 }}>
+                      {c.category} • {c.age_min}-{c.age_max} ay
+                    </div>
+                    <div style={{ opacity: 0.8 }}>{c.question}</div>
+                  </li>
                 ))}
               </ul>
             </details>
-          )}
+          ) : null}
+
+          <details style={{ marginTop: 12 }}>
+            <summary>Debug (meta)</summary>
+            <pre style={{ marginTop: 8 }}>
+{JSON.stringify(resp.meta, null, 2)}
+            </pre>
+          </details>
+
+          <details style={{ marginTop: 12 }}>
+            <summary>Gönderilen payload</summary>
+            <pre style={{ marginTop: 8 }}>
+{JSON.stringify(lastPayload, null, 2)}
+            </pre>
+          </details>
         </section>
       )}
     </main>
-  )
+  );
 }
