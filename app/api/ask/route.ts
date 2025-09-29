@@ -5,13 +5,12 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '../../../lib/supabaseServer'
 import OpenAI from 'openai'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
 
 type AskBody = { ageMonths?: number; question?: string }
 
 const RED_FLAGS =
   /(3.*ay.*(alt|küç).*|3\s*ay.*|üç.*ay.*).*\b38\b|nefes\s*darlığı|solunum\s*sıkıntısı|morarma|bayıl(ma|dı)|havale|konv(ü|u)lsiyon|bilinç\s*değ/i
-
 const DISCLAIMER =
   'Bu içerik tıbbi tavsiye değildir. Acil belirtilerde 112’yi arayın veya en yakın sağlık kuruluşuna başvurun.'
 
@@ -30,32 +29,34 @@ export async function POST(req: Request) {
     const q = String(body.question ?? '').trim().slice(0, 600)
     if (!q) return NextResponse.json({ error: 'question_required' }, { status: 400 })
 
-    // 1) Soruyu kaydet
+    // 1) soruyu kaydet
     await supabaseAdmin.from('questions').insert({ user_id: null, child_age_months: age, text: q })
 
-    // 2) FAQ adaylarını bul (yaş + kelime, sonra fallback'ler)
+    // 2) FAQ adayları (conditional .or — undefined vermiyoruz)
     const tokens = tokensOf(q)
     const cols = 'id, question, answer, source, category, age_min, age_max'
 
-    // a) yaş + kelime
-    let { data: faqs, error: fErr } = await supabaseAdmin
+    let qb = supabaseAdmin
       .from('faqs')
       .select(cols)
       .lte('age_min', age)
       .gte('age_max', age)
-      .or(tokens.length ? tokens.map(t => `question.ilike.%${t}%,answer.ilike.%${t}%`).join(',') : undefined)
-      .limit(5)
-    if (fErr) throw fErr
 
-    // b) yalnız yaş
-    if (!faqs?.length) {
+    if (tokens.length) {
+      qb = qb.or(tokens.map(t => `question.ilike.%${t}%,answer.ilike.%${t}%`).join(','))
+    }
+
+    const r1 = await qb.limit(5)
+    if (r1.error) throw r1.error
+    let faqs = r1.data ?? []
+
+    if (!faqs.length) {
       const r2 = await supabaseAdmin.from('faqs').select(cols).lte('age_min', age).gte('age_max', age).limit(5)
       if (r2.error) throw r2.error
       faqs = r2.data ?? []
     }
 
-    // c) yalnız kelime
-    if (!faqs?.length && tokens.length) {
+    if (!faqs.length && tokens.length) {
       const r3 = await supabaseAdmin
         .from('faqs')
         .select(cols)
@@ -65,12 +66,12 @@ export async function POST(req: Request) {
       faqs = r3.data ?? []
     }
 
+    // 3) LLM
     const urgent = RED_FLAGS.test(q)
     const context = (faqs ?? [])
       .map((f, i) => `# KAYNAK ${i + 1}\nKategori: ${f.category}\nSoru: ${f.question}\nYanıt: ${f.answer}`)
       .join('\n\n')
 
-    // 3) LLM dene
     let source: 'AI' | 'FAQ' | 'FALLBACK' = 'FALLBACK'
     let llmUsed = false
     let llmError: string | null = null
@@ -80,7 +81,8 @@ export async function POST(req: Request) {
       const system =
         `Sen bir çocuk sağlığı asistanısın; teşhis koymazsın, bilgilendirirsin.
 Kısa ve sakin Türkçe yanıt ver; en fazla 4–6 maddelik öneri yaz.
-0–60 ay için konuş. Yanıtın sonunda uyarı metnini ekle.` + (urgent ? '\nSORUDA ACİL UYARI VAR: Önce acil değerlendirme öner.' : '')
+0–60 ay için konuş. Yanıtın sonunda uyarı metnini ekle.` +
+        (urgent ? '\nSORUDA ACİL UYARI VAR: Önce acil değerlendirme öner.' : '')
 
       const userMsg = `Çocuğun yaşı (ay): ${age}
 Soru: ${q}
@@ -93,10 +95,7 @@ Yanıt biçimi: 1) 1 cümle özet 2) 3–5 madde öneri 3) "Ne zaman doktora?"`
         model: 'gpt-4o-mini',
         temperature: 0.3,
         max_tokens: 420,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userMsg },
-        ],
+        messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }],
       })
       aiAnswer = completion.choices?.[0]?.message?.content?.trim() || ''
       if (aiAnswer) {
@@ -107,17 +106,11 @@ Yanıt biçimi: 1) 1 cümle özet 2) 3–5 madde öneri 3) "Ne zaman doktora?"`
       llmError = e?.message || String(e)
     }
 
-    // 4) Nihai cevap
+    // 4) nihai cevap
     let final = ''
-    if (aiAnswer) {
-      final = `🔹 AI\n${aiAnswer}`
-    } else if (faqs?.[0]?.answer) {
-      final = `🔸 FAQ\n${faqs[0].answer}`
-      source = 'FAQ'
-    } else {
-      final = `🔺 Fallback\nÖn değerlendirme: Tehlike işareti görünmüyor. Çocuğu gözlemleyin, sıvı alımını takip edin. Belirti artarsa sağlık profesyoneline başvurun.`
-      source = 'FALLBACK'
-    }
+    if (aiAnswer) final = `🔹 AI\n${aiAnswer}`
+    else if (faqs[0]?.answer) { final = `🔸 FAQ\n${faqs[0].answer}`; source = 'FAQ' }
+    else { final = `🔺 Fallback\nÖn değerlendirme: Tehlike işareti görünmüyor. Çocuğu gözlemleyin, sıvı alımını takip edin. Belirti artarsa sağlık profesyoneline başvurun.`; source = 'FALLBACK' }
 
     return NextResponse.json({
       answer: `${final}\n\n${DISCLAIMER}`,
