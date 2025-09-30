@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type ApiResp = {
   answer?: string;
@@ -18,7 +18,6 @@ type ApiResp = {
   detail?: string;
 };
 
-
 const cleanAnswer = (s: string) =>
   (s || '').replace(/^🔹 AI\n|^🔸 FAQ\n|^🔺 Fallback\n/, '');
 
@@ -30,32 +29,30 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  
-import { useEffect, useState, useMemo } from 'react'; // en üstte
+  // Profilden yaş (ay) otomatik doldur (localStorage)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('babyq_profile_v1');
+      if (!raw) return;
+      const p = JSON.parse(raw) as { birth_date?: string };
+      if (!p?.birth_date) return;
 
-// ... Home() içinde:
-useEffect(() => {
-  try {
-    const raw = localStorage.getItem('babyq_profile_v1');
-    if (!raw) return;
-    const p = JSON.parse(raw) as { birth_date?: string };
-    if (!p?.birth_date) return;
+      const monthsBetween = (birthISO: string) => {
+        const b = new Date(birthISO);
+        const now = new Date();
+        let m =
+          (now.getFullYear() - b.getFullYear()) * 12 +
+          (now.getMonth() - b.getMonth());
+        if (now.getDate() < b.getDate()) m -= 1;
+        return Math.max(0, m);
+      };
 
-    // küçük yardımcı
-    const monthsBetween = (birthISO: string) => {
-      const b = new Date(birthISO);
-      const now = new Date();
-      let m = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
-      if (now.getDate() < b.getDate()) m -= 1;
-      return Math.max(0, m);
-    };
+      setAge(String(monthsBetween(p.birth_date)));
+    } catch {
+      // yut
+    }
+  }, []);
 
-    const m = monthsBetween(p.birth_date);
-    setAge(String(m)); // input’a yaz
-  } catch {}
-}, []);
-
-  
   // URL parametreleri
   const showDebug = useMemo(() => {
     if (typeof window === 'undefined') return false;
