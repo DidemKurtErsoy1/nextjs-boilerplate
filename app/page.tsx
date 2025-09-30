@@ -29,7 +29,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  // URL parametrelerinden debug ve provider (v) oku
+  // URL parametreleri
   const showDebug = useMemo(() => {
     if (typeof window === 'undefined') return false;
     return new URLSearchParams(window.location.search).has('debug');
@@ -58,8 +58,10 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+
+      // Ağ/sunucu hatalarını yakalayıp kullanıcıya göster
       const j = (await r.json()) as ApiResp;
-      if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
+      if (!r.ok) throw new Error(j?.error || j?.detail || `HTTP ${r.status}`);
       setResp(j);
     } catch (err: any) {
       setError(err?.message || 'Bir şeyler ters gitti.');
@@ -118,8 +120,8 @@ export default function Home() {
       </form>
 
       {error && (
-        <div style={{ marginTop: 16, color: 'crimson' }}>
-          Hata: {error}
+        <div style={{ marginTop: 16, padding: 12, border: '1px solid #f3c', background: '#fff0f6', borderRadius: 8, color: '#9c1c6b' }}>
+          <strong>Hata:</strong> {error}
         </div>
       )}
 
@@ -147,6 +149,14 @@ export default function Home() {
             {cleanAnswer(resp.answer || '')}
           </div>
 
+          {/* Disclaimer */}
+          {resp?.disclaimer && (
+            <div style={{ marginTop: 12, fontSize: 13, opacity: 0.75 }}>
+              {resp.disclaimer}
+            </div>
+          )}
+
+          {/* Kaynaklar */}
           {resp.candidates?.length ? (
             <details style={{ marginTop: 16 }}>
               <summary>Kaynakları göster ({resp.candidates.length})</summary>
@@ -163,7 +173,36 @@ export default function Home() {
             </details>
           ) : null}
 
-          {/* Debug panelleri sadece ?debug=1 ile görünür */}
+          {/* Feedback (isteğe bağlı; eklediysen /api/feedback çalışır) */}
+          <div style={{ marginTop: 12, display:'flex', gap:8 }}>
+            <button
+              onClick={async () => {
+                try {
+                  await fetch('/api/feedback', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ question_text: question, age_months: Number(age||0), was_helpful: true })
+                  });
+                  alert('Teşekkürler! 🙌');
+                } catch {}
+              }}
+              style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', cursor:'pointer' }}
+            >Faydalıydı 👍</button>
+
+            <button
+              onClick={async () => {
+                try {
+                  await fetch('/api/feedback', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ question_text: question, age_months: Number(age||0), was_helpful: false })
+                  });
+                  alert('Geri bildirimin için teşekkürler. 🙏');
+                } catch {}
+              }}
+              style={{ padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', cursor:'pointer' }}
+            >Faydalı değildi 👎</button>
+          </div>
+
+          {/* Debug sadece ?debug=1 ile */}
           {showDebug && (
             <>
               <details style={{ marginTop: 12 }}>
