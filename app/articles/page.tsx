@@ -50,6 +50,7 @@ export default function ArticlesPage() {
               ))}
             </div>
 
+            
             <div style={{ marginTop: 10 }}>
               <Link href={`/articles/${a.slug}`} style={{ color: "inherit" }}>
                 Devamını oku →
