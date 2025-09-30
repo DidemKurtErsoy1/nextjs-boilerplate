@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 type ApiResp = {
   answer?: string;
@@ -12,6 +12,7 @@ type ApiResp = {
     llmError?: string | null;
     matchedFaqs?: number;
     urgent?: boolean;
+    provider?: string;
   };
   error?: string;
   detail?: string;
@@ -28,43 +29,44 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  // ...
-async function onSubmit(e: React.FormEvent) {
-  e.preventDefault();
-  setLoading(true);
-  setError(null);
-  setResp(null);
+  // URL parametrelerinden debug ve provider (v) oku
+  const showDebug = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).has('debug');
+  }, []);
+  const providerQuery = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('v') || '';
+  }, []);
 
-  const payload = {
-    ageMonths: Number(age || 0),
-    question: question.trim(),
-  };
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setResp(null);
 
-  setLastPayload(payload);
+    const payload = {
+      ageMonths: Number(age || 0),
+      question: question.trim(),
+    };
+    setLastPayload(payload);
 
-  try {
-    // URL'deki ?v=... parametresini API'ye de taşı
-    const provider = typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search).get('v') || ''
-      : '';
-
-    const url = provider ? `/api/ask?v=${provider}` : '/api/ask';
-
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const j = (await r.json()) as ApiResp;
-    if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
-    setResp(j);
-  } catch (err: any) {
-    setError(err?.message || 'Bir şeyler ters gitti.');
-  } finally {
-    setLoading(false);
+    try {
+      const url = providerQuery ? `/api/ask?v=${providerQuery}` : '/api/ask';
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = (await r.json()) as ApiResp;
+      if (!r.ok) throw new Error(j?.error || j?.detail || 'Request failed');
+      setResp(j);
+    } catch (err: any) {
+      setError(err?.message || 'Bir şeyler ters gitti.');
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   return (
     <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
@@ -123,6 +125,23 @@ async function onSubmit(e: React.FormEvent) {
 
       {resp && (
         <section style={{ marginTop: 24 }}>
+          {/* ACİL uyarı kutusu */}
+          {resp?.meta?.urgent ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: 12,
+                border: '1px solid #f99',
+                background: '#fee',
+                color: '#900',
+                borderRadius: 8,
+              }}
+            >
+              <strong>ACİL UYARI:</strong> Belirtiler acil olabilir. 112’yi arayın veya en yakın sağlık
+              kuruluşuna başvurun.
+            </div>
+          ) : null}
+
           <h3 style={{ fontSize: 22, fontWeight: 700 }}>Yanıt</h3>
           <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
             {cleanAnswer(resp.answer || '')}
@@ -144,19 +163,24 @@ async function onSubmit(e: React.FormEvent) {
             </details>
           ) : null}
 
-          <details style={{ marginTop: 12 }}>
-            <summary>Debug (meta)</summary>
-            <pre style={{ marginTop: 8 }}>
+          {/* Debug panelleri sadece ?debug=1 ile görünür */}
+          {showDebug && (
+            <>
+              <details style={{ marginTop: 12 }}>
+                <summary>Debug (meta)</summary>
+                <pre style={{ marginTop: 8 }}>
 {JSON.stringify(resp.meta, null, 2)}
-            </pre>
-          </details>
+                </pre>
+              </details>
 
-          <details style={{ marginTop: 12 }}>
-            <summary>Gönderilen payload</summary>
-            <pre style={{ marginTop: 8 }}>
+              <details style={{ marginTop: 12 }}>
+                <summary>Gönderilen payload</summary>
+                <pre style={{ marginTop: 8 }}>
 {JSON.stringify(lastPayload, null, 2)}
-            </pre>
-          </details>
+                </pre>
+              </details>
+            </>
+          )}
         </section>
       )}
     </main>
