@@ -18,6 +18,7 @@ type ApiResp = {
   detail?: string;
 };
 
+
 const cleanAnswer = (s: string) =>
   (s || '').replace(/^🔹 AI\n|^🔸 FAQ\n|^🔺 Fallback\n/, '');
 
