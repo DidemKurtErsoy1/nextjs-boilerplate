@@ -86,8 +86,6 @@ export default function ProfilePage() {
     </main>
   );
 }
-
-
 type ApiResp = {
   answer?: string;
   candidates?: any[];
