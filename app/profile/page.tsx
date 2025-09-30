@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
 type Profile = { baby_name: string; birth_date: string };
-
 const LS_KEY = 'babyq_profile_v1';
 
 function monthsBetween(birthISO: string) {
@@ -20,7 +19,6 @@ export default function ProfilePage() {
   const [birthDate, setBirthDate] = useState('');
   const [saved, setSaved] = useState(false);
 
-  // localStorage'dan yükle
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
