@@ -3,10 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import SwRegister from "./sw-register"; // PWA service worker
+import SwRegister from "./sw-register";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
   title: "BabyQ — Anne Sorular",
@@ -29,31 +29,37 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} site-bg`}>
         <SwRegister />
 
         {/* Üst Bar */}
-        <header className="header glass">
-          <nav className="nav">
-            <Link className="brand" href="/">
-              <span className="brand-mark">👶</span>
+        <header className="site-header">
+          <nav className="site-nav">
+            <Link href="/" className="brand">
+              <span className="logo">👶</span>
               <span>BabyQ</span>
             </Link>
-            <div className="links">
-              <Link className="nav-btn" href="/">Soru-Cevap</Link>
-              <Link className="nav-btn" href="/articles">Yazılar</Link>
-              <Link className="nav-btn" href="/legal">Hukuki</Link>
+
+            <div className="spacer" />
+
+            <div className="nav-links">
+              <Link href="/" className="nav-link">Soru-Cevap</Link>
+              <Link href="/articles" className="nav-link">Yazılar</Link>
+              <Link href="/profile" className="nav-link">Profil</Link>
+              <Link href="/legal" className="nav-link">Hukuki</Link>
             </div>
           </nav>
         </header>
 
-        {/* Sayfa içeriği */}
-        <main className="container">
-          <section className="card">{children}</section>
+        {/* Sayfa içeriği (ortalanmış bir kart içinde) */}
+        <main className="site-main">
+          <section className="card">
+            {children}
+          </section>
         </main>
 
-        {/* Footer */}
-        <footer className="footer">
+        {/* Alt bilgi */}
+        <footer className="site-footer">
           © {new Date().getFullYear()} <strong>BabyQ</strong> — güvenli, kısa yanıtlar.
         </footer>
       </body>
