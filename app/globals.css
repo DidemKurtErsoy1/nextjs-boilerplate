@@ -24,3 +24,124 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+:root{
+  --bg: #0e0f14;
+  --bg2: #151823;
+  --card: #111319;
+  --text: #e9e9ef;
+  --muted: #a7adbd;
+  --accent: #8b9dff;
+  --accent-2: #66e0c2;
+  --border: rgba(255,255,255,0.08);
+}
+
+html, body { height: 100%; }
+
+.bg{
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at -10% -10%, rgba(139,157,255,0.12), transparent 60%),
+    radial-gradient(900px 450px at 120% -20%, rgba(102,224,194,0.10), transparent 60%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+}
+
+/* Header */
+.header{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: saturate(1.2);
+}
+.glass{
+  background: rgba(16,18,25,0.6);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.nav{
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  color: var(--text);
+}
+.brand-mark{
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(139,157,255,0.25), rgba(102,224,194,0.25));
+  border: 1px solid var(--border);
+}
+
+.links{ display: flex; gap: 8px; }
+.nav-btn{
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: var(--text);
+  opacity: 0.9;
+  transition: all .2s ease;
+}
+.nav-btn:hover{
+  border-color: var(--border);
+  background: rgba(255,255,255,0.04);
+  opacity: 1;
+}
+
+/* Content container */
+.container{
+  max-width: 960px;
+  margin: 28px auto 24px;
+  padding: 0 16px;
+}
+.card{
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* Footer */
+.footer{
+  max-width: 960px;
+  margin: 12px auto 36px;
+  padding: 8px 16px;
+  color: var(--muted);
+  text-align: center;
+  opacity: .8;
+}
+
+/* Form genel (halihazırdaki inline stilin yanında hoş dursun) */
+input, textarea, button{
+  font: inherit;
+  color: var(--text);
+}
+input, textarea{
+  background: #0b0d12;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+button{
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, rgba(139,157,255,0.25), rgba(102,224,194,0.25)) !important;
+  border: 1px solid var(--border) !important;
+}
+button:hover{
+  filter: brightness(1.08);
+}
