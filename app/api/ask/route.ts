@@ -21,39 +21,45 @@ const DISCLAIMER =
   'Bu içerik tıbbi tavsiye değildir. Acil belirtilerde 112’yi arayın veya en yakın sağlık kuruluşuna başvurun.';
 
 /** ------------ Yardımcılar ------------ */
+function cut(s: string, max = 400) {
+  if (!s) return '';
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
 function detectUrgent(ageMonths: number, text: string) {
   const s = (text || '').toLowerCase();
-  const redWords = ['nefes','solunum','zor','zorluk','morarma','mavi','havale','nöbet','bilinç','bayıl','tepkisiz'];
+  const redWords = [
+    'nefes','solunum','zor','zorluk','morarma','mavi',
+    'havale','nöbet','bilinç','bayıl','tepkisiz','hırıltı','hirilti'
+  ];
   const hasRed = redWords.some(w => s.includes(w));
   const hasFever = /(?:38(\.|,)?\d?)/.test(s) || s.includes('38 derece');
   const smallInfant = ageMonths >= 0 && ageMonths < 3 && hasFever;
   return hasRed || smallInfant;
 }
 
-// Sıcaklık (°C) yakala: "40", "40°", "40 C", "40 derece", "38.5"
+// Sıcaklık yakala: "38", "38.5", "38°", "38 C", "38 derece"
 function extractTempC(q: string): number | null {
   const s = (q || '').toLowerCase();
   const m = s.match(/(\d{2}(?:[.,]\d)?)(?:\s?°\s?c| ?c| ?derece)?/i);
   if (!m) return null;
   const n = parseFloat(m[1].replace(',', '.'));
-  if (isNaN(n)) return null;
-  // makul aralık kontrolü
-  if (n < 30 || n > 45) return null;
+  if (isNaN(n) || n < 30 || n > 45) return null;
   return n;
 }
 
-// Risk değerlendirme: kural tabanlı “acil” kesme
+// Kural tabanlı acil kesme
 function evaluateRisk(ageMonths: number, q: string) {
   const t = extractTempC(q);
-  const keywordsUrgent = detectUrgent(ageMonths, q);
-  const veryYoungFever = ageMonths < 3 && t !== null && t >= 38;
-  const hyperpyrexia = t !== null && t >= 40; // 40°C ve üzeri
-  if (hyperpyrexia || veryYoungFever || keywordsUrgent) {
-    return { level: 'emergency' as const, temp: t, reason: hyperpyrexia ? '≥40°C' : veryYoungFever ? '<3 ay + ≥38°C' : 'metinde acil belirti' };
-  }
-  return { level: 'normal' as const, temp: t, reason: null as string | null };
+  const emergency =
+    (t !== null && t >= 40) ||            // ≥40°C
+    (ageMonths < 3 && t !== null && t >= 38) || // <3 ay + ≥38°C
+    detectUrgent(ageMonths, q);           // kritik anahtarlar
+  return { emergency, temp: t };
 }
 
+// Basit anahtar kelime çıkarımı (eşanlamlar dahil)
 function extractKeywords(q: string) {
   const base = (q || '')
     .toLowerCase()
@@ -62,12 +68,29 @@ function extractKeywords(q: string) {
     .filter(Boolean);
 
   const extras: string[] = [];
-  if (base.includes('ateş') || base.includes('ates')) extras.push('ateş');
-  if (base.includes('uyku') || base.includes('uyum')) extras.push('uyku');
-  if (base.includes('ek') && base.includes('gıda')) extras.push('ek gıda');
-  if (base.includes('kabız') || base.includes('kabiz')) extras.push('kabızlık');
 
-  return Array.from(new Set([...base, ...extras])).slice(0, 10);
+  // ateş
+  if (base.some(w => ['ateş','ates','ateşi','atesi'].includes(w))) extras.push('ateş');
+
+  // öksürük
+  if (base.some(w => ['öksürük','oksuruk','öksürüyor','oksuruyor','hırıltı','hirilti','balgam'].includes(w))) {
+    extras.push('öksürük');
+  }
+
+  // ishal
+  if (base.some(w => ['ishal','diare','sulu','kaka'].includes(w))) extras.push('ishal');
+
+  // kusma
+  if (base.some(w => ['kusma','kustu','istifra','kusan'].includes(w))) extras.push('kusma');
+
+  // kabızlık
+  if (base.some(w => ['kabız','kabizlik','kabızlık','kabiz','kaka yapmıyor','sert'].includes(w))) extras.push('kabızlık');
+
+  // uyku / ek gıda
+  if (base.some(w => ['uyku','uyumuyor','gece'].includes(w))) extras.push('uyku');
+  if (base.includes('ek') && base.some(w => ['gıda','gida'].includes(w))) extras.push('ek gıda');
+
+  return Array.from(new Set([...base, ...extras])).slice(0, 12);
 }
 
 function supabaseServer() {
@@ -76,48 +99,83 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-/** ------------ GEMINI (v1 + 2.5-flash, kısa çıktı) ------------ */
-async function callGemini(prompt: string) {
+/** ------------ GEMINI (kısa, dayanıklı) ------------ */
+// Kısa ve hızlı modellerle sırayla dene; kısmi metin gelse bile kabul et
+async function geminiGenerate(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
   if (!key) throw new Error('GEMINI_API_KEY yok');
 
-  const model = 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
+  const MODELS = ['gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-2.5-flash'];
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }]}],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 160,  // mümkün olan en kısa yanıt
-        topP: 0.9,
-        topK: 40,
-      }
-    }),
-  });
+  for (const model of MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j?.error?.message || `HTTP ${res.status}`);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }]}],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 140, // kısa tut
+          candidateCount: 1
+        }
+      })
+    });
 
-  const parts = j?.candidates?.[0]?.content?.parts;
-  const text = Array.isArray(parts)
-    ? parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim()
-    : '';
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = j?.error?.message || `HTTP ${res.status}`;
+      if (/not\s+found|unsupported|permission/i.test(msg)) continue; // sıradaki model
+      throw new Error(msg);
+    }
 
-  if (text) return { text };
-  const finish = j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || 'empty_response';
-  throw new Error(String(finish));
+    const parts = j?.candidates?.[0]?.content?.parts || [];
+    const text  = parts.map((p:any)=>p?.text).filter(Boolean).join('\n').trim();
+    if (text) return { text };
+
+    // MAX_TOKENS / EMPTY / BLOCK… : metin yoksa sıradaki denemeye bırak
+  }
+
+  throw new Error('no_model_available_or_empty');
 }
 
-async function askGemini(system: string, user: string) {
-  const prompt = `${system}\n\n---\n\n${user}`;
+// Bağlamlı kısa prompt; düşerse bağlamsız çok kısa retry
+async function askGeminiSmart(ageMonths: number, question: string, faqs: Faq[], urgent: boolean) {
+  const system =
+    'Pediatri asistanısın; tanı koyma, ilaç/doz verme. Türkçe ve kısa yaz. ' +
+    'Biçim: 1 cümle özet; 3 madde öneri; 1 madde "Ne zaman doktora?". Toplam ≤90 kelime. ' +
+    'Acil belirti varsa önce ACİL uyar.';
+
+  const ctx = faqs.length
+    ? 'Kısa FAQ:\n' + faqs.map((f,i)=>
+        `- [${i+1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\n` +
+        `S: ${cut(f.question, 100)}\nC: ${cut(f.answer, 180)}`
+      ).join('\n')
+    : 'FAQ yoksa genel ama güvenli öneri yaz.';
+
+  const user =
+    `Bebek yaşı: ${ageMonths} ay\n` +
+    `Soru: ${cut(question, 140)}\n\n` +
+    ctx +
+    (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var; önce acil uyar.' : '');
+
+  // Deneme 1: bağlamlı kısa
   try {
-    const { text } = await callGemini(prompt);
-    return { text, llmUsed: true, llmError: null, provider: 'gemini' as const };
-  } catch (e: any) {
-    return { text: null, llmUsed: false, llmError: String(e?.message || e), provider: 'gemini' as const };
+    const r1 = await geminiGenerate(cut(`Sistem:\n${system}\n\nKullanıcı:\n${user}`, 1600));
+    return { text: r1.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
+  } catch (_) {
+    // Deneme 2: bağlamsız ultra kısa
+    try {
+      const user2 =
+        `Yaş: ${ageMonths} ay. Soru: ${cut(question, 140)}. ` +
+        (urgent ? 'Acil belirti mümkün, önce acil uyar.' : '') +
+        ' En fazla 5 satır ver.';
+      const r2 = await geminiGenerate(cut(`Sistem:\n${system}\n\nKullanıcı:\n${user2}`, 800));
+      return { text: r2.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
+    } catch (e2:any) {
+      return { text: null, llmUsed: false, llmError: String(e2?.message || e2), provider: 'gemini' as const };
+    }
   }
 }
 
@@ -131,7 +189,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
-    // Tally webhook desteği
+    // Tally webhook desteği (opsiyonel)
     let ageMonths = Number(body?.ageMonths ?? 0);
     let question = (body?.question ?? '').toString();
     if ((!ageMonths || !question) && body?.data?.fields?.length) {
@@ -147,54 +205,45 @@ export async function POST(req: Request) {
     }
     if (Number.isNaN(ageMonths) || ageMonths < 0) ageMonths = 0;
 
-    // 0) AŞIRI KISA SORU FİLTRESİ
+    // Çok kısa soru
     if (question.trim().length < 12) {
       const answer =
-        'Ön değerlendirme: Soru çok kısa. Daha doğru yönlendirme için şu soruları yanıtlayın:\n' +
-        '• Bebeğin yaşı (ay)?\n' +
-        '• Ölçülen en yüksek ateş kaç °C ve nasıl ölçtünüz?\n' +
-        '• Eşlik eden belirti var mı (nefes darlığı, morarma, kusma, uyuşukluk vb.)?';
+        'Ön değerlendirme: Soru çok kısa. Daha doğru yönlendirme için şunları ekleyin:\n' +
+        '• Bebeğin yaşı (ay)\n• Ölçülen en yüksek ateş ve nasıl ölçtünüz\n• Eşlik eden belirti (nefes darlığı, kusma vb.)';
       return NextResponse.json({
-        answer,
-        candidates: [],
-        disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: false }
+        answer, candidates: [], disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: false }
       });
     }
 
-    // 1) KURAL TABANLI ACİL KESME
+    // ACİL kuralı
     const risk = evaluateRisk(ageMonths, question);
-    if (risk.level === 'emergency') {
+    if (risk.emergency) {
       const t = risk.temp;
       const answer =
         '🔺 ACİL UYARI\n' +
         (t ? `• Bildirilen ateş: yaklaşık ${t}°C.\n` : '') +
         '• 40°C ve üzeri ateş veya 3 aydan küçük bebekte ≥38°C acil değerlendirme gerektirebilir.\n' +
         '• Hemen bir sağlık kuruluşuna başvurun veya 112’yi arayın.\n' +
-        '• İnce giydirin, serin ve havadar ortam sağlayın; bol sıvı teklif edin.\n' +
-        '• Soğuk duş/alkollü ovma uygulamayın; ilaç dozu yazmam.\n' +
-        '• Nefes darlığı, morarma, bilinç değişikliği, tepkisizlik olursa beklemeyin.';
+        '• İnce giydirin, serin ortam; bol sıvı teklif edin.\n' +
+        '• Soğuk duş/alkollü ovma uygulamayın; ilaç dozu yazmam.';
       return NextResponse.json({
-        answer,
-        candidates: [],
-        disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, matchedFaqs: 0, urgent: true }
+        answer, candidates: [], disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
       });
     }
 
     const urgent = detectUrgent(ageMonths, question);
 
-    // 2) Soruyu kaydet (best-effort)
+    // Soruyu kaydet (best-effort)
     try {
       const supa = supabaseServer();
       await supa.from('questions').insert({
-        user_id: null,
-        child_age_months: ageMonths,
-        text: question
+        user_id: null, child_age_months: ageMonths, text: question
       });
     } catch {}
 
-    // 3) Aday FAQ'lar (yaş + basit kelime skoru) — bağlamı kısa tut
+    // FAQ adayları (yaş + kelime skoru) → en fazla 2 bağlam
     let faqs: Faq[] = [];
     try {
       const supa = supabaseServer();
@@ -213,36 +262,13 @@ export async function POST(req: Request) {
           return { ...f, _score: score } as any;
         })
         .sort((a: any, b: any) => b._score - a._score)
-        .slice(0, 2) // bağlamı en fazla 2 FAQ
+        .slice(0, 2)
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
-    // 4) Bağlamı KISALT
-    const clip = (s: string, n: number) =>
-      (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
-
-    const system =
-      'Pediatri asistanısın. Tanı koymaz, ilaç/doz vermezsin. ' +
-      'Türkçe, sakin ve kısa yaz. Biçim: 1 kısa özet; 3 madde pratik öneri; "Ne zaman doktora?" için 1 madde. ' +
-      'Acil belirti varsa bunu vurgula.';
-
-    const context = faqs.length
-      ? 'Kısa FAQ bağlamı:\n' +
-        faqs.map((f, i) =>
-          `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\n` +
-          `Soru: ${clip(f.question, 100)}\n` +
-          `Cevap: ${clip(f.answer, 220)}`
-        ).join('\n\n')
-      : 'İlgili FAQ bulunamadı. Genel, güvenli öneriler ver.';
-
-    const userMsg =
-      `Bebek yaşı (ay): ${ageMonths}\n` +
-      `Soru: ${clip(question, 200)}\n\n` +
-      context +
-      (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var. Öncelikle acil uyarısını vurgula.' : '');
-
-    // 5) LLM
-    const { text: aiText, llmUsed, llmError, provider } = await askGemini(system, userMsg);
+    // LLM: bağlamlı kısa → olmazsa bağlamsız kısa
+    const { text: aiText, llmUsed, llmError, provider } =
+      await askGeminiSmart(ageMonths, question, faqs, urgent);
 
     let source: 'AI' | 'FAQ' | 'FALLBACK';
     let answer: string;
@@ -255,7 +281,9 @@ export async function POST(req: Request) {
       answer = `🔸 FAQ\n${faqs[0].answer}`;
     } else {
       source = 'FALLBACK';
-      answer = '🔺 Fallback\nÖn değerlendirme: Tehlike işareti görünmüyor. Çocuğu gözlemleyin, sıvı alımını izleyin. Belirti artarsa sağlık profesyoneline başvurun.';
+      answer =
+        '🔺 Fallback\nÖn değerlendirme: Tehlike işareti görünmüyor. ' +
+        'Çocuğu gözlemleyin, sıvı alımını izleyin. Belirti artarsa sağlık profesyoneline başvurun.';
     }
 
     return NextResponse.json({
