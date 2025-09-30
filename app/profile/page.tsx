@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-type Profile = {
-  baby_name: string;
-  birth_date: string; // yyyy-mm-dd
-};
+type Profile = { baby_name: string; birth_date: string };
+
+const LS_KEY = 'babyq_profile_v1';
 
 function monthsBetween(birthISO: string) {
   if (!birthISO) return 0;
@@ -16,18 +15,17 @@ function monthsBetween(birthISO: string) {
   return Math.max(0, m);
 }
 
-const LS_KEY = 'babyq_profile_v1';
-
 export default function ProfilePage() {
   const [babyName, setBabyName] = useState('');
-  const [birthDate, setBirthDate] = useState(''); // yyyy-mm-dd
+  const [birthDate, setBirthDate] = useState('');
   const [saved, setSaved] = useState(false);
 
+  // localStorage'dan yükle
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (raw) {
-        const p: Profile = JSON.parse(raw);
+        const p = JSON.parse(raw) as Profile;
         setBabyName(p.baby_name || '');
         setBirthDate(p.birth_date || '');
       }
@@ -51,7 +49,7 @@ export default function ProfilePage() {
         Bebeğin bilgilerini gir; <strong>yaş (ay)</strong> soru formunda otomatik dolacak.
       </p>
 
-      <form onSubmit={onSave} style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+      <form onSubmit={onSave} style={{ display: 'grid', gap: 12, marginTop: 16, maxWidth: 520 }}>
         <label>
           Bebek adı (opsiyonel)
           <input
@@ -79,14 +77,7 @@ export default function ProfilePage() {
 
         <button
           type="submit"
-          style={{
-            padding: '12px 14px',
-            background: '#111',
-            color: '#fff',
-            borderRadius: 8,
-            border: 0,
-            cursor: 'pointer'
-          }}
+          style={{ padding: '12px 14px', background: '#111', color: '#fff', borderRadius: 8, border: 0, cursor: 'pointer' }}
         >
           Kaydet
         </button>
