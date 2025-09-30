@@ -51,7 +51,7 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // URL parametreleri (?debug=1, ?v=gemini gibi)
+  // URL parametreleri
   const showDebug = useMemo(() => {
     if (typeof window === 'undefined') return false;
     return new URLSearchParams(window.location.search).has('debug');
@@ -80,7 +80,6 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       const j = (await r.json()) as ApiResp;
       if (!r.ok) throw new Error(j?.error || j?.detail || `HTTP ${r.status}`);
       setResp(j);
@@ -141,36 +140,26 @@ export default function Home() {
       </form>
 
       {error && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: 12,
-            border: '1px solid #f3c',
-            background: '#fff0f6',
-            borderRadius: 8,
-            color: '#9c1c6b',
-          }}
-        >
+        <div style={{ marginTop: 16, padding: 12, border: '1px solid #f3c', background: '#fff0f6', borderRadius: 8, color: '#9c1c6b' }}>
           <strong>Hata:</strong> {error}
         </div>
       )}
 
       {resp && (
         <section style={{ marginTop: 24 }}>
-          {/* ACİL uyarı kutusu */}
           {resp?.meta?.urgent ? (
             <div
               style={{
                 marginBottom: 12,
                 padding: 12,
-                border: '1px solid '#f99',
+                border: '1px solid #f99',
                 background: '#fee',
                 color: '#900',
                 borderRadius: 8,
               }}
             >
-              <strong>ACİL UYARI:</strong> Belirtiler acil olabilir. 112’yi
-              arayın veya en yakın sağlık kuruluşuna başvurun.
+              <strong>ACİL UYARI:</strong> Belirtiler acil olabilir. 112’yi arayın veya en yakın sağlık
+              kuruluşuna başvurun.
             </div>
           ) : null}
 
@@ -179,14 +168,12 @@ export default function Home() {
             {cleanAnswer(resp.answer || '')}
           </div>
 
-          {/* Disclaimer */}
           {resp?.disclaimer && (
             <div style={{ marginTop: 12, fontSize: 13, opacity: 0.75 }}>
               {resp.disclaimer}
             </div>
           )}
 
-          {/* Kaynaklar */}
           {resp.candidates?.length ? (
             <details style={{ marginTop: 16 }}>
               <summary>Kaynakları göster ({resp.candidates.length})</summary>
@@ -203,50 +190,6 @@ export default function Home() {
             </details>
           ) : null}
 
-          {/* Feedback (opsiyonel; /api/feedback varsa çalışır) */}
-          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-            <button
-              onClick={async () => {
-                try {
-                  const r = await fetch('/api/feedback', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      question_text: question,
-                      age_months: Number(age || 0),
-                      was_helpful: true,
-                    }),
-                  });
-                  if (r.ok) alert('Teşekkürler! 🙌');
-                } catch {}
-              }}
-              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
-            >
-              Faydalıydı 👍
-            </button>
-
-            <button
-              onClick={async () => {
-                try {
-                  const r = await fetch('/api/feedback', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      question_text: question,
-                      age_months: Number(age || 0),
-                      was_helpful: false,
-                    }),
-                  });
-                  if (r.ok) alert('Geri bildirimin için teşekkürler. 🙏');
-                } catch {}
-              }}
-              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
-            >
-              Faydalı değildi 👎
-            </button>
-          </div>
-
-          {/* Debug sadece ?debug=1 ile */}
           {showDebug && (
             <>
               <details style={{ marginTop: 12 }}>
