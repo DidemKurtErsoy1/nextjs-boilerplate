@@ -3,21 +3,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import SwRegister from "./sw-register"; // PWA service worker
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "BabyQ — Anne Sorular",
   description: "Her annenin aklına gelen sorulara güvenilir ve anında cevap.",
-  // PWA / ikonlar
   manifest: "/manifest.json",
   themeColor: "#111111",
   icons: {
@@ -27,48 +20,41 @@ export const metadata: Metadata = {
     ],
     apple: "/icon-192.png",
   },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+  },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr">
-      <head>
-        {/* iOS için standalone davranışı */}
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-      </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {/* Üst navigasyon */}
-        <header style={{ borderBottom: "1px solid #eee" }}>
-          <nav
-            style={{
-              maxWidth: 820,
-              margin: "0 auto",
-              padding: "12px 16px",
-              display: "flex",
-              gap: 16,
-            }}
-          >
-            <Link href="/">Soru-Cevap</Link>
-            <Link href="/articles">Yazılar</Link>
-            <Link href="/legal">Hukuki</Link>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg`}>
+        <SwRegister />
+
+        {/* Üst Bar */}
+        <header className="header glass">
+          <nav className="nav">
+            <Link className="brand" href="/">
+              <span className="brand-mark">👶</span>
+              <span>BabyQ</span>
+            </Link>
+            <div className="links">
+              <Link className="nav-btn" href="/">Soru-Cevap</Link>
+              <Link className="nav-btn" href="/articles">Yazılar</Link>
+              <Link className="nav-btn" href="/legal">Hukuki</Link>
+            </div>
           </nav>
         </header>
 
-        {/* Sayfa içerikleri */}
-        {children}
+        {/* Sayfa içeriği */}
+        <main className="container">
+          <section className="card">{children}</section>
+        </main>
 
-        {/* Alt bilgi */}
-        <footer
-          style={{
-            maxWidth: 820,
-            margin: "40px auto",
-            padding: "12px 16px",
-            opacity: 0.6,
-          }}
-        >
-          © {new Date().getFullYear()} BabyQ
+        {/* Footer */}
+        <footer className="footer">
+          © {new Date().getFullYear()} <strong>BabyQ</strong> — güvenli, kısa yanıtlar.
         </footer>
       </body>
     </html>
