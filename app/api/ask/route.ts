@@ -17,8 +17,9 @@ type Faq = {
 };
 
 /** ------------ Sabitler ------------ */
+// yerine geçsin
 const DISCLAIMER =
-  'Bu içerik tıbbi tavsiye değildir. Acil belirtilerde 112’yi arayın veya en yakın sağlık kuruluşuna başvurun.';
+  'This content is not medical advice. In emergencies, call your local emergency number or visit the nearest healthcare facility.';
 
 /** ------------ Yardımcılar ------------ */
 function cut(s: string, max = 400) {
@@ -140,44 +141,49 @@ async function geminiGenerate(prompt: string) {
   throw new Error('no_model_available_or_empty');
 }
 
-// Bağlamlı kısa prompt; düşerse bağlamsız çok kısa retry
-async function askGeminiSmart(ageMonths: number, question: string, faqs: Faq[], urgent: boolean) {
+/async function askGeminiSmart(ageMonths: number, question: string, faqs: Faq[], urgent: boolean) {
   const system =
-    'Pediatri asistanısın; tanı koyma, ilaç/doz verme. Türkçe ve kısa yaz. ' +
-    'Biçim: 1 cümle özet; 3 madde öneri; 1 madde "Ne zaman doktora?". Toplam ≤90 kelime. ' +
-    'Acil belirti varsa önce ACİL uyar.';
+    'You are a pediatric assistant. Do NOT diagnose or prescribe medications/doses. ' +
+    'Always answer in ENGLISH only. Tone: calm, concise, parent-friendly. ' +
+    'Structure your output exactly as: ' +
+    '- One short summary sentence.\n' +
+    '- Three bullet actionable tips.\n' +
+    '- One bullet: "When to see a doctor?". ' +
+    'If urgent red flags exist (<3 months + ≥38°C, breathing difficulty, cyanosis, altered consciousness), ' +
+    'start with an **URGENT** warning first. Keep total ≤ 90 words.';
 
   const ctx = faqs.length
-    ? 'Kısa FAQ:\n' + faqs.map((f,i)=>
-        `- [${i+1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} ay\n` +
-        `S: ${cut(f.question, 100)}\nC: ${cut(f.answer, 180)}`
+    ? 'Brief FAQ context:\n' + faqs.map((f,i)=>
+        `- [${i+1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} months\n` +
+        `Q: ${cut(f.question, 100)}\nA: ${cut(f.answer, 180)}`
       ).join('\n')
-    : 'FAQ yoksa genel ama güvenli öneri yaz.';
+    : 'No related FAQ found. Provide general yet safe guidance.';
 
   const user =
-    `Bebek yaşı: ${ageMonths} ay\n` +
-    `Soru: ${cut(question, 140)}\n\n` +
+    `Baby age (months): ${ageMonths}\n` +
+    `Question: ${cut(question, 140)}\n\n` +
     ctx +
-    (urgent ? '\n\nÖNEMLİ: Metinde olası acil belirti var; önce acil uyar.' : '');
+    (urgent ? '\n\nIMPORTANT: Possible urgent sign in the text. Start with URGENT warning.' : '');
 
-  // Deneme 1: bağlamlı kısa
+  // Try with context (short)
   try {
-    const r1 = await geminiGenerate(cut(`Sistem:\n${system}\n\nKullanıcı:\n${user}`, 1600));
+    const r1 = await geminiGenerate(cut(`System:\n${system}\n\nUser:\n${user}`, 1600));
     return { text: r1.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
   } catch (_) {
-    // Deneme 2: bağlamsız ultra kısa
+    // Fallback: ultra short without context
     try {
       const user2 =
-        `Yaş: ${ageMonths} ay. Soru: ${cut(question, 140)}. ` +
-        (urgent ? 'Acil belirti mümkün, önce acil uyar.' : '') +
-        ' En fazla 5 satır ver.';
-      const r2 = await geminiGenerate(cut(`Sistem:\n${system}\n\nKullanıcı:\n${user2}`, 800));
+        `Baby age: ${ageMonths} months. Question: ${cut(question, 140)}. ` +
+        (urgent ? 'Urgent flags possible; start with URGENT.' : '') +
+        ' Answer ONLY in English. Max 5 short lines.';
+      const r2 = await geminiGenerate(cut(`System:\n${system}\n\nUser:\n${user2}`, 800));
       return { text: r2.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
     } catch (e2:any) {
       return { text: null, llmUsed: false, llmError: String(e2?.message || e2), provider: 'gemini' as const };
     }
   }
 }
+
 
 /** ------------ GET (sağlık) ------------ */
 export async function GET() {
@@ -207,33 +213,36 @@ export async function POST(req: Request) {
 
     // Çok kısa soru
     if (question.trim().length < 12) {
-      const answer =
-        'Ön değerlendirme: Soru çok kısa. Daha doğru yönlendirme için şunları ekleyin:\n' +
-        '• Bebeğin yaşı (ay)\n• Ölçülen en yüksek ateş ve nasıl ölçtünüz\n• Eşlik eden belirti (nefes darlığı, kusma vb.)';
-      return NextResponse.json({
-        answer, candidates: [], disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: false }
-      });
-    }
+  return NextResponse.json({
+    answer:
+      'Your question seems too short. Please add:\n' +
+      '• Baby age in months\n' +
+      '• Highest measured temperature and how you measured it\n' +
+      '• Any accompanying symptoms (breathing difficulty, vomiting, etc.)',
+    candidates: [],
+    disclaimer: DISCLAIMER,
+    meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: false }
+  }, { status: 400 });
+}
+
 
     // ACİL kuralı
     const risk = evaluateRisk(ageMonths, question);
-    if (risk.emergency) {
-      const t = risk.temp;
-      const answer =
-        '🔺 ACİL UYARI\n' +
-        (t ? `• Bildirilen ateş: yaklaşık ${t}°C.\n` : '') +
-        '• 40°C ve üzeri ateş veya 3 aydan küçük bebekte ≥38°C acil değerlendirme gerektirebilir.\n' +
-        '• Hemen bir sağlık kuruluşuna başvurun veya 112’yi arayın.\n' +
-        '• İnce giydirin, serin ortam; bol sıvı teklif edin.\n' +
-        '• Soğuk duş/alkollü ovma uygulamayın; ilaç dozu yazmam.';
-      return NextResponse.json({
-        answer, candidates: [], disclaimer: DISCLAIMER,
-        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
-      });
-    }
+   if (risk.emergency) {
+  const t = risk.temp;
+  const answer =
+    '🔺 URGENT WARNING\n' +
+    (t ? `• Reported temperature: ~${t}°C.\n` : '') +
+    '• ≥40°C fever or infants <3 months with ≥38°C may require immediate evaluation.\n' +
+    '• Seek medical care now or call your local emergency number.\n' +
+    '• Dress lightly, keep a cool/aired room; offer fluids frequently.\n' +
+    '• Do NOT use cold baths or alcohol rubs; no dosing instructions provided.';
+  return NextResponse.json({
+    answer, candidates: [], disclaimer: DISCLAIMER,
+    meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
+  });
+}
 
-    const urgent = detectUrgent(ageMonths, question);
 
     // Soruyu kaydet (best-effort)
     try {
@@ -282,10 +291,10 @@ export async function POST(req: Request) {
     } else {
       source = 'FALLBACK';
       answer =
-        '🔺 Fallback\nÖn değerlendirme: Tehlike işareti görünmüyor. ' +
-        'Çocuğu gözlemleyin, sıvı alımını izleyin. Belirti artarsa sağlık profesyoneline başvurun.';
-    }
-
+       answer =
+  '🔺 Fallback\nInitial assessment: no immediate danger detected based on your text. ' +
+  'Monitor your child and keep up with fluids. If symptoms worsen or new red flags appear, seek medical care.';
+} 
     return NextResponse.json({
       answer,
       candidates: faqs,
