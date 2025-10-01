@@ -1,4 +1,5 @@
 // app/articles/page.tsx
+
 import Link from "next/link";
 import { articles } from "./data";
 
