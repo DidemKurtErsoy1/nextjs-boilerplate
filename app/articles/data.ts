@@ -1,85 +1,76 @@
 // app/articles/data.ts
-
 export type Article = {
   slug: string;
   title: string;
   excerpt: string;
+  updatedAt: string; // ISO
   author: string;
-  updatedAt: string; // ISO string
-  sections: Array<{ heading: string; body: string[] }>;
-  faq: Array<{ q: string; a: string }>;
-  sources?: string[];
+  content: {
+    hero?: string;
+    sections: Array<{ h2: string; paras: string[]; bullets?: string[] }>;
+    faq: Array<{ q: string; a: string }>;
+    sources?: string[];
+  };
 };
 
 export const articles: Article[] = [
   {
     slug: "starting-solids-6-9-months",
-    title: "Starting Solids (6–9 Months): A Calm, Practical Guide",
+    title: "Starting Solids (6–9 months)",
     excerpt:
-      "How to introduce solids safely, what to expect each week, and when to speak to a doctor.",
+      "How to safely introduce solids, what to expect by age, common concerns, and when to call your doctor.",
+    updatedAt: "2025-09-30",
     author: "BabyQ Editorial",
-    updatedAt: "2025-09-20",
-    sections: [
-      {
-        heading: "What to Expect by Age",
-        body: [
-          "6–7 months: single-ingredient purées, iron-rich foods first.",
-          "7–8 months: thicker textures, soft finger foods under supervision.",
-          "8–9 months: 2–3 small meals/day, offer water in an open/sippy cup.",
-        ],
-      },
-      {
-        heading: "Common Concerns",
-        body: [
-          "Gagging vs choking: gagging is common while learning.",
-          "Constipation: offer water, fiber-rich fruits (pear, prune), and movement.",
-          "Allergens: introduce one at a time; watch for reactions.",
-        ],
-      },
-      {
-        heading: "When to Seek Medical Care",
-        body: [
-          "Breathing difficulty, lip/face swelling, widespread hives.",
-          "Blood in stool, persistent vomiting, poor hydration/urination.",
-        ],
-      },
-      {
-        heading: "Quick Tips",
-        body: [
-          "Sit upright in a high chair; never leave baby unattended.",
-          "Offer variety; keep salt/sugar low.",
-          "Follow baby’s hunger/fullness cues.",
-        ],
-      },
-      {
-        heading: "Sources",
-        body: [
-          "AAP feeding guidelines, WHO infant nutrition recommendations.",
-        ],
-      },
-    ],
-    faq: [
-      { q: "How much should my baby eat per meal?", a: "Start with 1–2 tsp and increase gradually based on interest." },
-      { q: "Is water okay?", a: "Small sips with meals are fine from ~6 months unless advised otherwise." },
-      { q: "What about choking risk?", a: "Serve soft, pea-sized pieces; avoid hard/round foods; supervise closely." },
-      { q: "Do I need vitamins?", a: "Iron-rich foods are important; ask your clinician about supplements." },
-    ],
-    sources: ["AAP, WHO"],
-  },
-  {
-    slug: "fever-basics",
-    title: "Fever Basics: What Parents Should Know",
-    excerpt: "Understanding temperatures, comfort measures, and red flags.",
-    author: "BabyQ Editorial",
-    updatedAt: "2025-09-18",
-    sections: [
-      { heading: "Definition", body: ["Fever is typically ≥38.0°C measured properly."] },
-      { heading: "Comfort Measures", body: ["Light clothing, fluids, room ventilation."] },
-      { heading: "When to See a Doctor", body: ["<3 months with ≥38°C, breathing issues, persistent high fever, poor general state."] },
-    ],
-    faq: [
-      { q: "Which thermometer?", a: "Use a reliable digital thermometer; follow device instructions." },
-      { q: "Baths?", a: "Avoid cold baths/alcohol rubs; focus on comfort and hydration." },
-    ],
-  },
+    content: {
+      hero: "A gentle, safety-first guide to your baby’s first bites.",
+      sections: [
+        {
+          h2: "What to expect by age",
+          paras: [
+            "Between 6–7 months, most babies are ready to explore purees or soft, mashed textures.",
+            "By 8–9 months, finger foods and self-feeding skills improve, but supervision remains crucial."
+          ],
+          bullets: [
+            "Signs of readiness: good head control, sitting with support, interest in food.",
+            "Offer iron-rich options early (meat, legumes, fortified cereals)."
+          ]
+        },
+        {
+          h2: "Common concerns",
+          paras: [
+            "Gagging is common when learning textures; choking is silent and requires immediate action.",
+            "Introduce one new food at a time to notice reactions."
+          ],
+          bullets: ["Avoid honey before 12 months.", "Cut round foods into small, soft pieces."]
+        },
+        {
+          h2: "When to contact a doctor",
+          paras: [
+            "If there is trouble breathing, swelling of lips/face, repetitive vomiting, or hives spreading—seek urgent care."
+          ]
+        },
+        {
+          h2: "Quick tips",
+          paras: ["Keep meals calm, short, and baby-led."],
+          bullets: [
+            "Sit upright; no feeding in car seat.",
+            "Never leave baby unattended.",
+            "Water is limited; breastmilk/formula remains primary."
+          ]
+        },
+        {
+          h2: "Sources",
+          paras: [],
+          bullets: [
+            "AAP HealthyChildren.org",
+            "WHO complementary feeding guidance"
+          ]
+        }
+      ],
+      faq: [
+        { q: "How many meals per day?", a: "Start with 1, then 2, then 3 by 8–9 months if interested." },
+        { q: "Allergy introduction?", a: "Peanut/egg early in tiny amounts if no contraindication; monitor closely." }
+      ]
+    }
+  }
 ];
