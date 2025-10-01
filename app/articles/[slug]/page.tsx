@@ -1,4 +1,5 @@
 // app/articles/[slug]/page.tsx
+
 import { notFound } from "next/navigation";
 import { articles } from "../data";
 
