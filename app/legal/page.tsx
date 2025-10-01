@@ -1,5 +1,4 @@
 // app/legal/page.tsx
-
 export default function LegalPage() {
   return (
     <main style={{ maxWidth: 820, margin:'24px auto', padding:16 }}>
