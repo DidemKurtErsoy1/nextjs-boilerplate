@@ -232,31 +232,28 @@ export default function Home() {
             </label>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button
-                type="submit"
-                disabled={loading || !question.trim()}
-                style={{
-                  padding: '12px 16px',
-                  background: loading
-                    ? '#9CA3AF'
-                    : 'linear-gradient(135deg, #FFB84D, #3DDC97)',
-                  color: '#0b1220',
-                  fontWeight: 800,
-                  borderRadius: 12,
-                  border: 0,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 6px 14px rgba(61,220,151,.25)',
-                  transition: 'transform .06s ease',
-                }}
-                onMouseDown={(e) =>
-                  (e.currentTarget.style.transform = 'scale(0.98)')
-                }
-                onMouseUp={(e) =>
-                  (e.currentTarget.style.transform = 'scale(1)')
-                }
-              >
-                {loading ? '🤖 Generating answer…' : '✨ Get Answer'}
-              </button>
+            <button
+  type="submit"
+  disabled={loading || !question.trim()}
+  style={{
+    padding: '12px 16px',
+    background: '#ffffff',
+    color: '#0b1220',
+    fontWeight: 800,
+    borderRadius: 12,
+    border: '1px solid #E2E8F0',
+    cursor: loading ? 'not-allowed' : 'pointer',
+    boxShadow: loading ? 'none' : '0 2px 10px rgba(0,0,0,.06)',
+    transition: 'transform .06s ease, box-shadow .12s ease, border-color .12s ease',
+  }}
+  onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,.10)')}
+  onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,.06)')}
+  onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
+  onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+>
+  {loading ? '🤖 Generating answer…' : '✨ Get Answer'}
+</button>
+
 
               <a
                 href="/profile"
