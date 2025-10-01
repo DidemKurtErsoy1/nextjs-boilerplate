@@ -7,8 +7,7 @@ const LS_KEY = 'babyq_profile_v1';
 
 function monthsBetween(birthISO: string) {
   if (!birthISO) return 0;
-  const b = new Date(birthISO);
-  const now = new Date();
+  const b = new Date(birthISO); const now = new Date();
   let m = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
   if (now.getDate() < b.getDate()) m -= 1;
   return Math.max(0, m);
@@ -41,46 +40,46 @@ export default function ProfilePage() {
   }
 
   return (
-    <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Profil</h1>
+    <main style={{ maxWidth: 820, margin: '24px auto', padding: 16 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 800 }}>Profile</h1>
       <p style={{ opacity: .75, marginTop: 6 }}>
-        Bebeğin bilgilerini gir; <strong>yaş (ay)</strong> soru formunda otomatik dolacak.
+        Enter your baby’s info. <strong>Age (months)</strong> will auto-fill on the Ask page.
       </p>
 
       <form onSubmit={onSave} style={{ display: 'grid', gap: 12, marginTop: 16, maxWidth: 520 }}>
         <label>
-          Bebek adı (opsiyonel)
+          Baby’s name (optional)
           <input
             value={babyName}
             onChange={(e) => setBabyName(e.target.value)}
-            placeholder="Örn. Defne"
-            style={{ width: '100%', padding: 10, marginTop: 6 }}
+            placeholder="e.g. Daisy"
+            style={{ width: '100%', padding: 10, marginTop: 6, border:'1px solid #E5E7EB', borderRadius:12 }}
           />
         </label>
 
         <label>
-          Doğum tarihi
+          Date of birth
           <input
             type="date"
             value={birthDate}
             onChange={(e) => setBirthDate(e.target.value)}
-            style={{ width: '100%', padding: 10, marginTop: 6 }}
+            style={{ width: '100%', padding: 10, marginTop: 6, border:'1px solid #E5E7EB', borderRadius:12 }}
             required
           />
         </label>
 
         <div style={{ opacity: .85 }}>
-          Hesaplanan yaş: <strong>{ageMonths}</strong> ay
+          Calculated age: <strong>{ageMonths}</strong> months
         </div>
 
         <button
           type="submit"
-          style={{ padding: '12px 14px', background: '#111', color: '#fff', borderRadius: 8, border: 0, cursor: 'pointer' }}
+          style={{ padding: '12px 14px', background: '#111', color: '#fff', borderRadius: 12, border: 0, cursor: 'pointer' }}
         >
-          Kaydet
+          Save
         </button>
 
-        {saved && <div style={{ color: 'green' }}>Kaydedildi ✓</div>}
+        {saved && <div style={{ color: 'green' }}>Saved ✓</div>}
       </form>
     </main>
   );
