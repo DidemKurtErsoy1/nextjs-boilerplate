@@ -1,10 +1,11 @@
+// app/api/ask/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-/** ------------ Tipler ------------ */
+/** ------------ Types ------------ */
 type Faq = {
   id: string;
   age_min: number;
@@ -16,12 +17,11 @@ type Faq = {
   created_at?: string;
 };
 
-/** ------------ Sabitler ------------ */
-// yerine geçsin
+/** ------------ Constants ------------ */
 const DISCLAIMER =
   'This content is not medical advice. In emergencies, call your local emergency number or visit the nearest healthcare facility.';
 
-/** ------------ Yardımcılar ------------ */
+/** ------------ Helpers ------------ */
 function cut(s: string, max = 400) {
   if (!s) return '';
   const t = s.replace(/\s+/g, ' ').trim();
@@ -30,9 +30,11 @@ function cut(s: string, max = 400) {
 
 function detectUrgent(ageMonths: number, text: string) {
   const s = (text || '').toLowerCase();
+  // Turkish keywords (users may type Turkish); we just detect them.
   const redWords = [
-    'nefes','solunum','zor','zorluk','morarma','mavi',
-    'havale','nöbet','bilinç','bayıl','tepkisiz','hırıltı','hirilti'
+    'nefes', 'solunum', 'zor', 'zorluk', 'morarma', 'mavi',
+    'havale', 'nöbet', 'nobet', 'bilinç', 'bayıl', 'tepkisiz',
+    'hırıltı', 'hirilti'
   ];
   const hasRed = redWords.some(w => s.includes(w));
   const hasFever = /(?:38(\.|,)?\d?)/.test(s) || s.includes('38 derece');
@@ -40,7 +42,7 @@ function detectUrgent(ageMonths: number, text: string) {
   return hasRed || smallInfant;
 }
 
-// Sıcaklık yakala: "38", "38.5", "38°", "38 C", "38 derece"
+// Parse temperature values like: 38, 38.5, 38°, 38 C, 38 derece
 function extractTempC(q: string): number | null {
   const s = (q || '').toLowerCase();
   const m = s.match(/(\d{2}(?:[.,]\d)?)(?:\s?°\s?c| ?c| ?derece)?/i);
@@ -50,17 +52,15 @@ function extractTempC(q: string): number | null {
   return n;
 }
 
-// Kural tabanlı acil kesme
 function evaluateRisk(ageMonths: number, q: string) {
   const t = extractTempC(q);
   const emergency =
-    (t !== null && t >= 40) ||            // ≥40°C
-    (ageMonths < 3 && t !== null && t >= 38) || // <3 ay + ≥38°C
-    detectUrgent(ageMonths, q);           // kritik anahtarlar
+    (t !== null && t >= 40) ||                  // ≥40°C
+    (ageMonths < 3 && t !== null && t >= 38) || // <3 months + ≥38°C
+    detectUrgent(ageMonths, q);
   return { emergency, temp: t };
 }
 
-// Basit anahtar kelime çıkarımı (eşanlamlar dahil)
 function extractKeywords(q: string) {
   const base = (q || '')
     .toLowerCase()
@@ -70,25 +70,25 @@ function extractKeywords(q: string) {
 
   const extras: string[] = [];
 
-  // ateş
-  if (base.some(w => ['ateş','ates','ateşi','atesi'].includes(w))) extras.push('ateş');
+  // fever
+  if (base.some(w => ['ateş','ates','ateşi','atesi','fever'].includes(w))) extras.push('ateş');
 
-  // öksürük
-  if (base.some(w => ['öksürük','oksuruk','öksürüyor','oksuruyor','hırıltı','hirilti','balgam'].includes(w))) {
+  // cough
+  if (base.some(w => ['öksürük','oksuruk','öksürüyor','oksuruyor','hırıltı','hirilti','balgam','cough'].includes(w))) {
     extras.push('öksürük');
   }
 
-  // ishal
-  if (base.some(w => ['ishal','diare','sulu','kaka'].includes(w))) extras.push('ishal');
+  // diarrhea
+  if (base.some(w => ['ishal','diare','diarrhea','sulu','kaka'].includes(w))) extras.push('ishal');
 
-  // kusma
-  if (base.some(w => ['kusma','kustu','istifra','kusan'].includes(w))) extras.push('kusma');
+  // vomiting
+  if (base.some(w => ['kusma','kustu','istifra','kusan','vomit','vomiting'].includes(w))) extras.push('kusma');
 
-  // kabızlık
-  if (base.some(w => ['kabız','kabizlik','kabızlık','kabiz','kaka yapmıyor','sert'].includes(w))) extras.push('kabızlık');
+  // constipation
+  if (base.some(w => ['kabız','kabizlik','kabızlık','kabiz','constipation'].includes(w))) extras.push('kabızlık');
 
-  // uyku / ek gıda
-  if (base.some(w => ['uyku','uyumuyor','gece'].includes(w))) extras.push('uyku');
+  // sleep / solids
+  if (base.some(w => ['uyku','sleep','uyumuyor','gece','night'].includes(w))) extras.push('uyku');
   if (base.includes('ek') && base.some(w => ['gıda','gida'].includes(w))) extras.push('ek gıda');
 
   return Array.from(new Set([...base, ...extras])).slice(0, 12);
@@ -100,12 +100,12 @@ function supabaseServer() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-/** ------------ GEMINI (kısa, dayanıklı) ------------ */
-// Kısa ve hızlı modellerle sırayla dene; kısmi metin gelse bile kabul et
+/** ------------ Gemini (short, resilient) ------------ */
 async function geminiGenerate(prompt: string) {
   const key = process.env.GEMINI_API_KEY!;
-  if (!key) throw new Error('GEMINI_API_KEY yok');
+  if (!key) throw new Error('GEMINI_API_KEY missing');
 
+  // Try fast/cheap first, then stronger
   const MODELS = ['gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-2.5-flash'];
 
   for (const model of MODELS) {
@@ -118,7 +118,7 @@ async function geminiGenerate(prompt: string) {
         contents: [{ role: 'user', parts: [{ text: prompt }]}],
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 140, // kısa tut
+          maxOutputTokens: 140,
           candidateCount: 1
         }
       })
@@ -127,34 +127,33 @@ async function geminiGenerate(prompt: string) {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = j?.error?.message || `HTTP ${res.status}`;
-      if (/not\s+found|unsupported|permission/i.test(msg)) continue; // sıradaki model
+      if (/not\s+found|unsupported|permission/i.test(msg)) continue;
       throw new Error(msg);
     }
 
     const parts = j?.candidates?.[0]?.content?.parts || [];
-    const text  = parts.map((p:any)=>p?.text).filter(Boolean).join('\n').trim();
+    const text = parts.map((p: any) => p?.text).filter(Boolean).join('\n').trim();
     if (text) return { text };
-
-    // MAX_TOKENS / EMPTY / BLOCK… : metin yoksa sıradaki denemeye bırak
+    // else: try next model
   }
 
   throw new Error('no_model_available_or_empty');
 }
 
-/async function askGeminiSmart(ageMonths: number, question: string, faqs: Faq[], urgent: boolean) {
+async function askGeminiSmart(ageMonths: number, question: string, faqs: Faq[], urgent: boolean) {
   const system =
     'You are a pediatric assistant. Do NOT diagnose or prescribe medications/doses. ' +
     'Always answer in ENGLISH only. Tone: calm, concise, parent-friendly. ' +
-    'Structure your output exactly as: ' +
-    '- One short summary sentence.\n' +
-    '- Three bullet actionable tips.\n' +
-    '- One bullet: "When to see a doctor?". ' +
+    'Structure exactly:\n' +
+    '• One short summary sentence.\n' +
+    '• Three bullet actionable tips.\n' +
+    '• One bullet: "When to see a doctor?". ' +
     'If urgent red flags exist (<3 months + ≥38°C, breathing difficulty, cyanosis, altered consciousness), ' +
-    'start with an **URGENT** warning first. Keep total ≤ 90 words.';
+    'start with an URGENT warning first. Keep total ≤ 90 words.';
 
   const ctx = faqs.length
-    ? 'Brief FAQ context:\n' + faqs.map((f,i)=>
-        `- [${i+1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} months\n` +
+    ? 'Brief FAQ context:\n' + faqs.map((f, i) =>
+        `- [${i + 1}] ${f.category ?? ''} • ${f.age_min}-${f.age_max} months\n` +
         `Q: ${cut(f.question, 100)}\nA: ${cut(f.answer, 180)}`
       ).join('\n')
     : 'No related FAQ found. Provide general yet safe guidance.';
@@ -163,14 +162,12 @@ async function geminiGenerate(prompt: string) {
     `Baby age (months): ${ageMonths}\n` +
     `Question: ${cut(question, 140)}\n\n` +
     ctx +
-    (urgent ? '\n\nIMPORTANT: Possible urgent sign in the text. Start with URGENT warning.' : '');
+    (urgent ? '\n\nIMPORTANT: Possible urgent sign. Start with URGENT warning.' : '');
 
-  // Try with context (short)
   try {
     const r1 = await geminiGenerate(cut(`System:\n${system}\n\nUser:\n${user}`, 1600));
     return { text: r1.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
-  } catch (_) {
-    // Fallback: ultra short without context
+  } catch {
     try {
       const user2 =
         `Baby age: ${ageMonths} months. Question: ${cut(question, 140)}. ` +
@@ -178,24 +175,23 @@ async function geminiGenerate(prompt: string) {
         ' Answer ONLY in English. Max 5 short lines.';
       const r2 = await geminiGenerate(cut(`System:\n${system}\n\nUser:\n${user2}`, 800));
       return { text: r2.text, llmUsed: true, llmError: null, provider: 'gemini' as const };
-    } catch (e2:any) {
+    } catch (e2: any) {
       return { text: null, llmUsed: false, llmError: String(e2?.message || e2), provider: 'gemini' as const };
     }
   }
 }
 
-
-/** ------------ GET (sağlık) ------------ */
+/** ------------ GET ------------ */
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
 
-/** ------------ POST (soru-cevap) ------------ */
+/** ------------ POST (Q&A) ------------ */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
 
-    // Tally webhook desteği (opsiyonel)
+    // Optional Tally webhook mapping
     let ageMonths = Number(body?.ageMonths ?? 0);
     let question = (body?.question ?? '').toString();
     if ((!ageMonths || !question) && body?.data?.fields?.length) {
@@ -207,44 +203,44 @@ export async function POST(req: Request) {
     }
 
     if (!question?.trim()) {
-      return NextResponse.json({ error: 'Eksik parametre: question' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing parameter: question' }, { status: 400 });
     }
     if (Number.isNaN(ageMonths) || ageMonths < 0) ageMonths = 0;
 
-    // Çok kısa soru
+    // Very short question -> ask for details (English)
     if (question.trim().length < 12) {
-  return NextResponse.json({
-    answer:
-      'Your question seems too short. Please add:\n' +
-      '• Baby age in months\n' +
-      '• Highest measured temperature and how you measured it\n' +
-      '• Any accompanying symptoms (breathing difficulty, vomiting, etc.)',
-    candidates: [],
-    disclaimer: DISCLAIMER,
-    meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: false }
-  }, { status: 400 });
-}
+      return NextResponse.json({
+        answer:
+          'Your question seems too short. Please add:\n' +
+          '• Baby age in months\n' +
+          '• Highest measured temperature and how you measured it\n' +
+          '• Any accompanying symptoms (breathing difficulty, vomiting, etc.)',
+        candidates: [],
+        disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: false }
+      }, { status: 400 });
+    }
 
-
-    // ACİL kuralı
+    // Rule-based urgent cut
     const risk = evaluateRisk(ageMonths, question);
-   if (risk.emergency) {
-  const t = risk.temp;
-  const answer =
-    '🔺 URGENT WARNING\n' +
-    (t ? `• Reported temperature: ~${t}°C.\n` : '') +
-    '• ≥40°C fever or infants <3 months with ≥38°C may require immediate evaluation.\n' +
-    '• Seek medical care now or call your local emergency number.\n' +
-    '• Dress lightly, keep a cool/aired room; offer fluids frequently.\n' +
-    '• Do NOT use cold baths or alcohol rubs; no dosing instructions provided.';
-  return NextResponse.json({
-    answer, candidates: [], disclaimer: DISCLAIMER,
-    meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
-  });
-}
+    if (risk.emergency) {
+      const t = risk.temp;
+      const answer =
+        '🔺 URGENT WARNING\n' +
+        (t ? `• Reported temperature: ~${t}°C.\n` : '') +
+        '• ≥40°C fever or infants <3 months with ≥38°C may require immediate evaluation.\n' +
+        '• Seek medical care now or call your local emergency number.\n' +
+        '• Dress lightly, keep a cool/ventilated room; offer fluids frequently.\n' +
+        '• Do NOT use cold baths or alcohol rubs; no dosing instructions provided.';
+      return NextResponse.json({
+        answer, candidates: [], disclaimer: DISCLAIMER,
+        meta: { source: 'FALLBACK', llmUsed: false, llmError: null, provider: 'rules', matchedFaqs: 0, urgent: true }
+      });
+    }
 
+    const urgent = detectUrgent(ageMonths, question);
 
-    // Soruyu kaydet (best-effort)
+    // Save question (best-effort)
     try {
       const supa = supabaseServer();
       await supa.from('questions').insert({
@@ -252,7 +248,7 @@ export async function POST(req: Request) {
       });
     } catch {}
 
-    // FAQ adayları (yaş + kelime skoru) → en fazla 2 bağlam
+    // Candidate FAQs (age + simple keyword score) → keep context short
     let faqs: Faq[] = [];
     try {
       const supa = supabaseServer();
@@ -275,7 +271,7 @@ export async function POST(req: Request) {
         .map((f: any) => { delete f._score; return f as Faq; });
     } catch { faqs = []; }
 
-    // LLM: bağlamlı kısa → olmazsa bağlamsız kısa
+    // LLM: contextual short → fallback ultra-short
     const { text: aiText, llmUsed, llmError, provider } =
       await askGeminiSmart(ageMonths, question, faqs, urgent);
 
@@ -291,10 +287,10 @@ export async function POST(req: Request) {
     } else {
       source = 'FALLBACK';
       answer =
-       answer =
-  '🔺 Fallback\nInitial assessment: no immediate danger detected based on your text. ' +
-  'Monitor your child and keep up with fluids. If symptoms worsen or new red flags appear, seek medical care.';
-} 
+        '🔺 Fallback\nInitial assessment: no immediate danger detected based on your text. ' +
+        'Monitor your child and keep up with fluids. If symptoms worsen or new red flags appear, seek medical care.';
+    }
+
     return NextResponse.json({
       answer,
       candidates: faqs,
@@ -303,7 +299,7 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     return NextResponse.json(
-      { error: 'İşlenemeyen istek', detail: e?.message || 'unknown' },
+      { error: 'Unprocessable request', detail: e?.message || 'unknown' },
       { status: 500 }
     );
   }
