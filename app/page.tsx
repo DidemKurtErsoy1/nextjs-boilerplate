@@ -29,24 +29,29 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  // Autofill age (months) from Profile (localStorage)
+  // Autofill age (months) from local profile
   useEffect(() => {
     try {
       const raw = localStorage.getItem('babyq_profile_v1');
       if (!raw) return;
       const p = JSON.parse(raw) as { birth_date?: string };
       if (!p?.birth_date) return;
+
       const monthsBetween = (birthISO: string) => {
-        const b = new Date(birthISO); const now = new Date();
-        let m = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
+        const b = new Date(birthISO);
+        const now = new Date();
+        let m =
+          (now.getFullYear() - b.getFullYear()) * 12 +
+          (now.getMonth() - b.getMonth());
         if (now.getDate() < b.getDate()) m -= 1;
         return Math.max(0, m);
       };
+
       setAge(String(monthsBetween(p.birth_date)));
     } catch {}
   }, []);
 
-  // URL params
+  // URL flags
   const showDebug = useMemo(() => {
     if (typeof window === 'undefined') return false;
     return new URLSearchParams(window.location.search).has('debug');
@@ -58,14 +63,23 @@ export default function Home() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true); setError(null); setResp(null);
+    setLoading(true);
+    setError(null);
+    setResp(null);
 
-    const payload = { ageMonths: Number(age || 0), question: question.trim() };
+    const payload = {
+      ageMonths: Number(age || 0),
+      question: question.trim(),
+    };
     setLastPayload(payload);
 
     try {
       const url = providerQuery ? `/api/ask?v=${providerQuery}` : '/api/ask';
-      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       const j = (await r.json()) as ApiResp;
       if (!r.ok) throw new Error(j?.error || j?.detail || `HTTP ${r.status}`);
       setResp(j);
@@ -78,154 +92,121 @@ export default function Home() {
 
   return (
     <>
-      {/* HERO: orange → yellow */}
-      <div style={{
-        borderRadius: 18,
-        padding: 24,
-        marginBottom: 16,
-        background: 'linear-gradient(135deg, #FF8A3D 0%, #FFC857 100%)',
-        color: '#0b1220',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
-        boxShadow: '0 20px 40px rgba(255, 168, 56, .20)'
-      }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-          <span style={{ fontSize:28, lineHeight:1 }}>👶</span>
-          <h1 style={{ fontSize: 34, lineHeight:1.2, margin:0, fontWeight: 800 }}>
-            BabyQ — Parenting Answers
-          </h1>
-        </div>
-        <p style={{ margin:0, opacity:.85, fontSize:16 }}>
-          Trusted, instant answers to the questions every parent has.
-        </p>
-      </div>
+      {/* Hero (amber-only gradient) */}
+      <section className="hero section">
+        <div className="badge" aria-hidden="true">👶</div>
+        <h1>BabyQ — Parenting Answers</h1>
+        <p className="muted">Trusted, instant answers to the questions every parent has.</p>
+      </section>
 
-      {/* FORM */}
-      <form onSubmit={onSubmit} style={{
-        display:'grid', gap:12,
-        background:'#ffffff', padding:16, borderRadius:16,
-        border:'1px solid #EEF2F7', boxShadow:'0 10px 30px rgba(2,12,27,.06)'
-      }}>
-        <label>
-          Baby’s age (months)
+      {/* Form card */}
+      <section className="card section" aria-labelledby="ask-title">
+        <h2 id="ask-title" style={{ marginTop: 0, marginBottom: 12 }}>Ask a question</h2>
+
+        <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12 }}>
+          <label className="label" htmlFor="age">
+            Baby’s age (months)
+          </label>
           <input
+            id="age"
+            name="age"
             type="number"
             min={0}
             max={60}
             value={age}
             onChange={(e) => setAge(e.target.value)}
-            style={{
-              width:'100%', padding:12, marginTop:6,
-              background:'#ffffff', color:'#0b1220',
-              border:'1px solid #E5E7EB', borderRadius:12, outline:'none',
-              boxShadow:'inset 0 1px 2px rgba(16,24,40,.04)',
-              transition:'border-color .12s ease, box-shadow .12s ease'
-            }}
-            onFocus={(e)=>{ e.currentTarget.style.borderColor='#FB923C'; e.currentTarget.style.boxShadow='0 0 0 3px rgba(251,146,60,.25)';}}
-            onBlur={(e)=>{ e.currentTarget.style.borderColor='#E5E7EB'; e.currentTarget.style.boxShadow='inset 0 1px 2px rgba(16,24,40,.04)';}}
+            className="input"
+            placeholder="e.g. 7"
             required
+            aria-required="true"
           />
-        </label>
 
-        <label>
-          What’s the concern?
+          <label className="label" htmlFor="question">
+            What’s the concern?
+          </label>
           <textarea
+            id="question"
+            name="question"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            rows={5}
+            className="textarea"
             placeholder="e.g. My baby is coughing a lot and has a 38.2°C fever. What should I do?"
-            style={{
-              width:'100%', padding:12, marginTop:6, resize:'vertical',
-              background:'#ffffff', color:'#0b1220',
-              border:'1px solid #E5E7EB', borderRadius:12, outline:'none',
-              boxShadow:'inset 0 1px 2px rgba(16,24,40,.04)',
-              transition:'border-color .12s ease, box-shadow .12s ease'
-            }}
-            onFocus={(e)=>{ e.currentTarget.style.borderColor='#FB923C'; e.currentTarget.style.boxShadow='0 0 0 3px rgba(251,146,60,.25)';}}
-            onBlur={(e)=>{ e.currentTarget.style.borderColor='#E5E7EB'; e.currentTarget.style.boxShadow='inset 0 1px 2px rgba(16,24,40,.04)';}}
             required
+            aria-required="true"
           />
-        </label>
 
-        <button
-          type="submit"
-          disabled={loading || !question.trim()}
-          style={{
-            padding:'12px 16px',
-            background:'#ffffff',
-            color:'#0b1220', fontWeight:800,
-            borderRadius:12, border:'1px solid #E2E8F0',
-            cursor: loading ? 'not-allowed':'pointer',
-            boxShadow: loading ? 'none' : '0 2px 10px rgba(0,0,0,.06)',
-            transition:'transform .06s ease, box-shadow .12s ease, border-color .12s ease'
-          }}
-          onMouseEnter={(e)=> e.currentTarget.style.boxShadow='0 4px 14px rgba(0,0,0,.10)'}
-          onMouseLeave={(e)=> e.currentTarget.style.boxShadow='0 2px 10px rgba(0,0,0,.06)'}
-          onMouseDown={(e)=> e.currentTarget.style.transform='scale(0.98)'}
-          onMouseUp={(e)=> e.currentTarget.style.transform='scale(1)'}
-        >
-          {loading ? 'Generating…' : 'Get Answer'}
-        </button>
-      </form>
+          <button
+            type="submit"
+            className="btn"
+            disabled={loading || !question.trim()}
+            aria-busy={loading}
+          >
+            {loading ? 'Preparing answer…' : 'Get answer'}
+          </button>
+        </form>
 
-      {/* Errors */}
-      {error && (
-        <div style={{
-          marginTop:16, padding:12, border:'1px solid #FECACA',
-          background:'#FEF2F2', color:'#991B1B', borderRadius:12
-        }}>
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+        {/* Error */}
+        {error && (
+          <div className="alert-danger" style={{ marginTop: 14 }}>
+            <strong>Error:</strong> {error}
+          </div>
+        )}
+      </section>
 
       {/* Answer */}
       {resp && (
-        <section style={{ marginTop: 24 }}>
+        <section className="card section" aria-labelledby="answer-title">
+          {/* emergency banner */}
           {resp?.meta?.urgent ? (
-            <div style={{
-              marginBottom:12, padding:12, border:'1px solid #FDBA74',
-              background:'#FFF7ED', color:'#9A3412', borderRadius:12
-            }}>
-              <strong>URGENT:</strong> Symptoms may be urgent. Call emergency services or go to the nearest facility.
+            <div className="alert" role="alert" style={{ marginBottom: 12 }}>
+              <strong>URGENT:</strong> Symptoms may be urgent. Call emergency services or visit the nearest healthcare facility.
             </div>
           ) : null}
 
-          <h3 style={{ fontSize: 20, fontWeight: 800, margin:'8px 0' }}>Answer</h3>
-          <div style={{ whiteSpace:'pre-wrap', marginTop:8, background:'#fff', border:'1px solid #EEF2F7', borderRadius:12, padding:12 }}>
+          <h2 id="answer-title" style={{ marginTop: 0 }}>Answer</h2>
+          <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
             {cleanAnswer(resp.answer || '')}
           </div>
 
+          {/* Disclaimer */}
           {resp?.disclaimer && (
-            <div style={{ marginTop: 10, fontSize: 13, opacity: .75 }}>
+            <div className="muted" style={{ marginTop: 12, fontSize: 13 }}>
               {resp.disclaimer}
             </div>
           )}
 
+          {/* Sources */}
           {resp.candidates?.length ? (
-            <details style={{ marginTop: 14 }}>
-              <summary>Show sources ({resp.candidates.length})</summary>
+            <details style={{ marginTop: 16 }}>
+              <summary>Sources ({resp.candidates.length})</summary>
               <ul style={{ marginTop: 8 }}>
                 {resp.candidates.map((c: any, i: number) => (
                   <li key={c.id || i} style={{ marginBottom: 8 }}>
                     <div style={{ fontWeight: 600 }}>
-                      {c.category} • {c.age_min}-{c.age_max} mo
+                      {c.category} • {c.age_min}-{c.age_max} months
                     </div>
-                    <div style={{ opacity: 0.8 }}>{c.question}</div>
+                    <div className="muted">{c.question}</div>
                   </li>
                 ))}
               </ul>
             </details>
           ) : null}
 
+          {/* Debug (only with ?debug=1) */}
           {showDebug && (
             <>
               <details style={{ marginTop: 12 }}>
                 <summary>Debug (meta)</summary>
-                <pre style={{ marginTop: 8 }}>{JSON.stringify(resp.meta, null, 2)}</pre>
+                <pre style={{ marginTop: 8 }}>
+{JSON.stringify(resp.meta, null, 2)}
+                </pre>
               </details>
 
               <details style={{ marginTop: 12 }}>
-                <summary>Payload</summary>
-                <pre style={{ marginTop: 8 }}>{JSON.stringify(lastPayload, null, 2)}</pre>
+                <summary>Sent payload</summary>
+                <pre style={{ marginTop: 8 }}>
+{JSON.stringify(lastPayload, null, 2)}
+                </pre>
               </details>
             </>
           )}
