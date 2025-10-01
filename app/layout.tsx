@@ -26,43 +26,38 @@ export const metadata: Metadata = {
   },
 };
 
+// ...imports ve metadata aynı...
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="tr">
-      <body className={`${geistSans.variable} ${geistMono.variable} site-bg`}>
+    <html lang="en">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} style={{ background:'#fff' }}>
         <SwRegister />
 
-        {/* Üst Bar */}
-        <header className="site-header">
-          <nav className="site-nav">
-            <Link href="/" className="brand">
-              <span className="logo">👶</span>
+        <header className="header glass">
+          <nav className="nav">
+            <Link className="brand" href="/">
+              <span className="brand-mark">👶</span>
               <span>BabyQ</span>
             </Link>
-
-            <div className="spacer" />
-
-            <div className="nav-links">
-              <Link href="/" className="nav-link">Soru-Cevap</Link>
-              <Link href="/articles" className="nav-link">Yazılar</Link>
-              <Link href="/profile" className="nav-link">Profil</Link>
-              <Link href="/legal" className="nav-link">Hukuki</Link>
+            <div className="links">
+              <Link className="nav-btn" href="/">Ask</Link>
+              <Link className="nav-btn" href="/articles">Articles</Link>
+              <Link className="nav-btn" href="/profile">Profile</Link>
+              <Link className="nav-btn" href="/legal">Legal</Link>
             </div>
           </nav>
         </header>
 
-        {/* Sayfa içeriği (ortalanmış bir kart içinde) */}
-        <main className="site-main">
-          <section className="card">
-            {children}
-          </section>
+        <main className="container">
+          <section className="card">{children}</section>
         </main>
 
-        {/* Alt bilgi */}
-        <footer className="site-footer">
-          © {new Date().getFullYear()} <strong>BabyQ</strong> — güvenli, kısa yanıtlar.
+        <footer className="footer">
+          © {new Date().getFullYear()} <strong>BabyQ</strong> — trusted, instant answers.
         </footer>
       </body>
     </html>
   );
 }
+
