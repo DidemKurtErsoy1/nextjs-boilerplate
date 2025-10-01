@@ -1,4 +1,5 @@
 // app/articles/data.ts
+
 export type Article = {
   slug: string;
   title: string;
